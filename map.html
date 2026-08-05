@@ -447,9 +447,11 @@ L.polygon(CLAIMED_BORDER, {
 // which accept a CanvasPattern just as well as a string. A separate SVG-pattern renderer
 // would mean a separate canvas and bring the cross-polygon blending problem back
 // (CONVENTIONS §10), so this stays on-canvas instead.
-// Darker variant per faction — highlights a feature changed within the last 24h (see
-// isRecentChange() and the style callbacks in loadRegions/loadZones below).
-var DARK_COLORS = { ukraine: '#1e3a8a', russia: '#7f1d1d' };
+// Brighter variant per faction — highlights a feature changed within the last 24h (see
+// isRecentChange() and the style callbacks in loadRegions/loadZones below). Deliberately
+// lighter/more saturated than the base faction colour, not darker: a recent change should
+// pop off the map, not read as a muddy grey smudge next to everything else.
+var RECENT_COLORS = { ukraine: '#60a5fa', russia: '#f87171' };
 
 // STRIPE_BAND is the shared band width (px, at pattern-tile scale) for every hatch —
 // contested (two-tone) and attack (one-tone-on-transparent) alike, so the two read as one
@@ -478,14 +480,14 @@ function stripePattern(key, strokeColor, bgColor) {
   _stripePatterns[key] = octx.createPattern(off, 'repeat');
   return _stripePatterns[key];
 }
-function contestedPattern(dark) {
-  return dark ? stripePattern('contested_d', '#1e3a8a', '#7f1d1d')    // blue bands over dark red
-              : stripePattern('contested_n', '#3b82f6', '#ef4444');   // blue bands over red
+function contestedPattern(recent) {
+  return recent ? stripePattern('contested_r', '#60a5fa', '#f87171')   // bright blue bands over bright red
+                : stripePattern('contested_n', '#3b82f6', '#ef4444');  // blue bands over red
 }
-function attackPattern(faction_id, dark) {
+function attackPattern(faction_id, recent) {
   var f = FACTIONS[faction_id] || { color: '#555555' };
-  var color = (dark && DARK_COLORS[faction_id]) || f.color;
-  return stripePattern('attack_' + faction_id + (dark ? '_d' : '_n'), color, null);
+  var color = (recent && RECENT_COLORS[faction_id]) || f.color;
+  return stripePattern('attack_' + faction_id + (recent ? '_r' : '_n'), color, null);
 }
 function isRecentChange(iso) {
   if (!iso) return false;
@@ -501,7 +503,7 @@ function factionStyle(faction_id, pattern, recent) {
     ? contestedPattern(recent)
     : pattern === 'attack'
     ? attackPattern(faction_id, recent)
-    : (recent && DARK_COLORS[faction_id]) || f.color;
+    : (recent && RECENT_COLORS[faction_id]) || f.color;
   return {
     pane: 'fills', renderer: fillsR,
     color: paint, fillColor: paint,
