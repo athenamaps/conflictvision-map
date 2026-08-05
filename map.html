@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Conflict Map</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+#toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 14px; background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
+  z-index: 1000; flex-shrink: 0;
+}
+#toolbar h1 { font-size: 13px; font-weight: 600; color: #bbb; letter-spacing: .06em; }
+#legend { display: flex; gap: 10px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #aaa; }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+#last-updated { margin-left: auto; font-size: 11px; color: #555; }
+
+#map { flex: 1; min-height: 0; }
+
+#statusbar {
+  padding: 5px 14px; font-size: 11px; color: #555;
+  background: #161616; border-top: 1px solid #222;
+  display: flex; gap: 16px; align-items: center; flex-shrink: 0;
+}
+#count { margin-left: auto; }
+#status-msg.err { color: #b45c5c; }
+
+.zone-popup { font-family: 'Segoe UI', sans-serif; min-width: 200px; }
+.zone-popup h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #eee; }
+.zone-popup .meta { font-size: 11px; color: #888; margin: 2px 0; }
+.zone-popup .faction-badge {
+  display: inline-block; font-size: 11px; padding: 2px 9px;
+  border-radius: 999px; margin: 4px 0 6px; font-weight: 500;
+}
+.zone-popup .snippet {
+  font-size: 11px; color: #666; font-style: italic;
+  margin-top: 6px; border-top: 1px solid #2a2a2a; padding-top: 6px;
+}
+
+.leaflet-popup-content-wrapper { background: #1e1e1e; color: #eee; border: 1px solid #333; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.6); }
+.leaflet-popup-tip { background: #1e1e1e; }
+.leaflet-popup-close-button { color: #666 !important; }
+.leaflet-control-layers { background: #1e1e1e !important; border: 1px solid #333 !important; color: #ccc !important; }
+.leaflet-control-layers label { color: #ccc; font-size: 12px; }
+.leaflet-bar a { background: #222 !important; color: #ccc !important; border-color: #333 !important; }
+.leaflet-bar a:hover { background: #2a2a2a !important; }
+.leaflet-control-attribution { background: rgba(20,20,20,.8) !important; color: #777 !important; }
+.leaflet-control-attribution a { color: #999 !important; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>⚔ CONFLICT MAP</h1>
+  <div id="legend"></div>
+  <span id="last-updated">Loading…</span>
+</div>
+
+<div id="map"></div>
+
+<div id="statusbar">
+  <span id="status-msg">Loading territory…</span>
+  <span id="count"></span>
+</div>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<script>
+// Faction ids, colours AND display names must stay identical to listener.py,
+// bootstrap.html and editor.html (CONVENTIONS §5). The editor is the only writer,
+// so an id that exists there and not here publishes territory this viewer renders
+// grey. Rename factions in all four files in the same commit or not at all.
+var FACTIONS = {
+  "side_a":    { name: "Side A",    color: "#3b82f6" },
+  "side_b":    { name: "Side B",    color: "#ef4444" },
+  "contested": { name: "Contested", color: "#f59e0b" },
+  "neutral":   { name: "Neutral",   color: "#9ca3af" },
+};
+
+var REFRESH_MS = 60000;
+
+var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> — settlement boundaries also derived from OSM (ODbL)',
+  maxZoom: 18,
+});
+var satellite = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution: 'Tiles &copy; Esri — boundaries derived from OpenStreetMap (ODbL)', maxZoom: 18 }
+);
+
+var map = L.map('map', { layers: [osm] }).setView([48.5, 33.5], 7);
+L.control.layers({ 'Street': osm, 'Satellite': satellite }, {}, { position: 'topright' }).addTo(map);
+
+// ── Fills: one pane, one canvas, opaque shapes ────────────────────────────────
+// Mirrors bootstrap.html and editor.html. Per-feature fillOpacity composites wherever
+// two polygons overlap and produces a colour nobody painted — a settlement zone sitting
+// on a region of the SAME faction lights up as a different shade. Drawing every fill
+// fully opaque into a single canvas and putting the translucency on the pane means
+// whatever is drawn last simply replaces what is under it. Both groups must share
+// `fillsR`: separate renderers mean separate canvases and the blending is back.
+map.createPane('fills');
+map.getPane('fills').style.zIndex = 400;
+map.getPane('fills').style.opacity = '0.42';
+var fillsR = L.canvas({ pane: 'fills', padding: 0.3 });
+
+var regionLayer = null;   // control_regions.geojson — wholesale territory, drawn first
+var zoneLayer   = null;   // zones.geojson — per-settlement claims, drawn on top
+
+// The 1px stroke is the fill colour, never a contrasting outline: it exists only to close
+// the antialiased hairline between abutting polygons (CONVENTIONS §10).
+function factionStyle(faction_id) {
+  var f = FACTIONS[faction_id] || { color: "#555555" };
+  return {
+    pane: 'fills', renderer: fillsR,
+    color: f.color, fillColor: f.color,
+    fillOpacity: 1, weight: 1, opacity: 1, lineJoin: 'round',
+  };
+}
+
+function formatDate(iso) {
+  if (!iso) return "unknown";
+  var d = new Date(iso);
+  if (isNaN(d)) return "unknown";
+  return d.toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+  });
+}
+
+function factionBadge(fid) {
+  var f = FACTIONS[fid] || { name: fid || "unknown", color: "#888" };
+  return '<span class="faction-badge" style="background:' + f.color + '22;color:' + f.color
+       + ';border:1px solid ' + f.color + '44">' + f.name + '</span>';
+}
+
+// Zones and regions are different documents with different schemas — a region has no
+// settlement_name, no areas and no source snippet, so it gets its own popup rather than
+// a shared one full of absent fields.
+function zonePopup(p) {
+  return '<div class="zone-popup">'
+    + '<h3>' + (p.settlement_name || "Unnamed") + '</h3>'
+    + factionBadge(p.faction)
+    + '<p class="meta">Updated: ' + formatDate(p.last_updated) + '</p>'
+    + (p.source          ? '<p class="meta">Source: ' + p.source + '</p>' : '')
+    + (p.source_channel  ? '<p class="meta">Channel: @' + p.source_channel + '</p>' : '')
+    + (p.admin_area_km2  ? '<p class="meta">Admin boundary: ' + p.admin_area_km2 + ' km²</p>' : '')
+    + (p.zone_area_km2   ? '<p class="meta">Controlled zone: ' + p.zone_area_km2 + ' km²</p>' : '')
+    + (p.source_snippet  ? '<p class="snippet">"' + p.source_snippet.substring(0, 120) + '…"</p>' : '')
+    + '</div>';
+}
+
+function regionPopup(p) {
+  return '<div class="zone-popup">'
+    + '<h3>' + (p.name || "Unnamed area") + '</h3>'
+    + factionBadge(p.faction)
+    + (p.zone_type ? '<p class="meta">Type: ' + p.zone_type + '</p>' : '')
+    + '<p class="meta">Updated: ' + formatDate(p.last_updated) + '</p>'
+    + '</div>';
+}
+
+// ── Loading ───────────────────────────────────────────────────────────────────
+// The two files are independent documents fetched independently: one missing or
+// malformed must not blank the other. Counts are tracked separately so the status bar
+// can say which half is live.
+var counts = { zones: null, regions: null };
+var errors = { zones: null, regions: null };
+
+function report() {
+  var msgEl = document.getElementById('status-msg');
+  var errMsgs = [];
+  if (errors.regions) errMsgs.push(errors.regions);
+  if (errors.zones)   errMsgs.push(errors.zones);
+
+  if (errMsgs.length) {
+    msgEl.textContent = errMsgs.join(' · ');
+    msgEl.className = 'err';
+  } else {
+    msgEl.textContent = 'Territory loaded';
+    msgEl.className = '';
+  }
+
+  var z = counts.zones, r = counts.regions;
+  document.getElementById('count').textContent =
+    (r === null ? '' : r + ' area' + (r !== 1 ? 's' : '') + ' · ')
+    + (z === null ? '' : z + ' settlement' + (z !== 1 ? 's' : ''));
+  document.getElementById('last-updated').textContent =
+    'Refreshed ' + new Date().toLocaleTimeString();
+}
+
+// Draw order inside the shared canvas is add order, and the two fetches race — so
+// ordering is asserted after each load rather than left to whichever returned last.
+function restack() {
+  if (zoneLayer && zoneLayer.bringToFront) { try { zoneLayer.bringToFront(); } catch (e) {} }
+}
+
+function loadRegions() {
+  fetch('control_regions.geojson?_=' + Date.now())
+    .then(function (r) {
+      if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (data) {
+      if (regionLayer) map.removeLayer(regionLayer);
+      regionLayer = L.geoJSON(data, {
+        // pane and renderer are constructor-time options — Leaflet applies them via
+        // geometryToLayer, not via setStyle. Returning them from the style function
+        // alone silently drops both and every fill lands in the default overlay pane
+        // at full opacity.
+        pane: 'fills', renderer: fillsR,
+        style: function (f) { return factionStyle((f.properties || {}).faction); },
+        onEachFeature: function (f, layer) {
+          var p = f.properties || {};
+          layer.bindPopup(regionPopup(p));
+          if (p.name) layer.bindTooltip(p.name, { sticky: true });
+        }
+      }).addTo(map);
+      counts.regions = (data.features || []).length;
+      errors.regions = null;
+      restack();
+      report();
+    })
+    .catch(function (err) {
+      // A repo with no wholesale territory yet is a valid state, not a failure.
+      if (err.missing) { counts.regions = 0; errors.regions = null; }
+      else errors.regions = 'Control areas unavailable (' + err.message + ')';
+      report();
+    });
+}
+
+function loadZones() {
+  fetch('zones.geojson?_=' + Date.now())
+    .then(function (r) {
+      if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (data) {
+      if (zoneLayer) map.removeLayer(zoneLayer);
+      zoneLayer = L.geoJSON(data, {
+        pane: 'fills', renderer: fillsR,
+        style: function (f) { return factionStyle((f.properties || {}).faction); },
+        onEachFeature: function (f, layer) {
+          var p = f.properties || {};
+          layer.bindPopup(zonePopup(p));
+          if (p.settlement_name) layer.bindTooltip(p.settlement_name, { sticky: true });
+        }
+      }).addTo(map);
+      counts.zones = (data.features || []).length;
+      errors.zones = null;
+      restack();
+      report();
+    })
+    .catch(function (err) {
+      if (err.missing) { counts.zones = 0; errors.zones = null; }
+      else errors.zones = 'Settlement zones unavailable (' + err.message + ')';
+      report();
+    });
+}
+
+function refresh() { loadRegions(); loadZones(); }
+
+function buildLegend() {
+  var legend = document.getElementById('legend');
+  Object.keys(FACTIONS).forEach(function (fid) {
+    var item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = '<div class="legend-dot" style="background:' + FACTIONS[fid].color + '"></div>'
+                   + '<span>' + FACTIONS[fid].name + '</span>';
+    legend.appendChild(item);
+  });
+}
+
+buildLegend();
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
