@@ -31,17 +31,20 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 #measure-readout .hint { font-size: 10.5px; color: #888; margin-top: 4px; }
 
 #stats-widget {
-  position: absolute; left: 12px; top: 12px; z-index: 900;
+  /* Bottom-anchored, not top: growing content pushes the top edge up instead of
+     downward into the timeline bar below the map. left offset clears the scale control
+     (also bottom-left) which sits underneath it. */
+  position: absolute; left: 12px; bottom: 48px; z-index: 900;
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
-  font-size: 12px; color: #ddd; display: none; max-width: 260px;
+  font-size: 12px; color: #ddd; display: none; max-width: 300px;
   box-shadow: 0 6px 24px rgba(0,0,0,.6); overflow: hidden;
 }
 #stats-widget .stats-head { padding: 8px 12px; cursor: pointer; font-weight: 600; color: #eee; white-space: nowrap; }
-#stats-widget .stats-summary { padding: 0 12px 8px; }
-#stats-widget .stats-summary .val { color: #fff; font-weight: 600; }
-#stats-widget .stats-note { font-size: 10.5px; color: #888; margin-top: 4px; }
-#stats-widget .stats-list { max-height: 220px; overflow-y: auto; border-top: 1px solid #2a2a2a; padding: 4px 12px 8px; }
-#stats-widget .stats-row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-size: 11.5px; color: #bbb; }
+#stats-widget .stats-list { max-height: 260px; overflow-y: auto; padding: 4px 12px 8px; }
+#stats-widget .stats-row { padding: 4px 0; border-bottom: 1px solid #2a2a2a; }
+#stats-widget .stats-row:last-child { border-bottom: none; }
+#stats-widget .stats-row-top { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: #bbb; }
+#stats-widget .stats-row-areas { font-size: 10.5px; color: #888; margin-top: 2px; }
 #last-updated { margin-left: auto; font-size: 11px; color: #555; }
 
 #map-wrap { flex: 1; min-height: 0; position: relative; }
@@ -87,6 +90,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 .basemap-switcher .bs-group-title:first-child { margin-top: -6px; }
 .basemap-switcher .bs-row { display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 2px; cursor: pointer; white-space: nowrap; }
 .basemap-switcher .bs-row input { margin: 0; }
+.leaflet-control-scale-line {
+  background: rgba(20,20,20,.85) !important; color: #ddd !important;
+  border-color: #666 !important; font-size: 11px !important;
+}
 .leaflet-control-attribution { background: rgba(20,20,20,.8) !important; color: #777 !important; }
 .leaflet-control-attribution a { color: #999 !important; }
 
@@ -113,6 +120,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   background: #242424; color: #eee; border: 1px solid #383838; border-radius: 6px;
   padding: 4px 8px; font-size: 12px;
 }
+#history-date::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
 #history-live {
   font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
   background: #242424; color: #ccc; border: 1px solid #383838;
@@ -124,8 +132,9 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 <body>
 
 <div id="toolbar">
-  <h1>⚔ CONFLICT MAP</h1>
+  <h1 id="app-title">⚔ CONFLICT MAP</h1>
   <button class="tool" id="tool-measure" title="Draw a polygon to measure its area and perimeter">📐 Measure</button>
+  <button class="tool" id="tool-lang" title="Switch language">RU</button>
   <span id="last-updated">Loading…</span>
 </div>
 
@@ -168,6 +177,116 @@ var FACTIONS = {
 };
 
 var REFRESH_MS = 60000;
+
+// ── i18n: UI chrome only — settlement/place names are never translated here, see
+// docs/CONVENTIONS.md §6 (Russian/Ukrainian name matching is already a known gap upstream,
+// and zones.geojson stores only a single settlement_name — no ru/en variant to draw on).
+var LANG_KEY = 'cv_lang';
+var currentLang = localStorage.getItem(LANG_KEY) === 'ru' ? 'ru' : 'en';
+function pluralRu(n, one, few, many) {
+  var n100 = Math.abs(n) % 100, n10 = n100 % 10;
+  if (n100 > 10 && n100 < 20) return many;
+  if (n10 > 1 && n10 < 5) return few;
+  if (n10 === 1) return one;
+  return many;
+}
+var STRINGS = {
+  en: {
+    measure: '📐 Measure',
+    measureTitle: 'Draw a polygon to measure its area and perimeter',
+    langToggleTitle: 'Switch to Russian',
+    loading: 'Loading…',
+    refreshed: function (time) { return 'Refreshed ' + time; },
+    loadingTerritory: 'Loading territory…',
+    territoryLoaded: 'Territory loaded',
+    controlAreasUnavailable: function (msg) { return 'Control areas unavailable (' + msg + ')'; },
+    settlementZonesUnavailable: function (msg) { return 'Settlement zones unavailable (' + msg + ')'; },
+    countAreas: function (n) { return n + ' area' + (n !== 1 ? 's' : ''); },
+    countSettlements: function (n) { return n + ' settlement' + (n !== 1 ? 's' : ''); },
+    statsHeader: 'Percent of controlled territories',
+    ruPct: function (p) { return p + '% RU'; },
+    rowAreas: function (ru, ua) { return 'Russia: ' + ru + ' km² · Ukraine: ' + ua + ' km²'; },
+    historyDateTitle: 'Select a date to revert the frontline to how it looked at the end of that day',
+    live: '● Live',
+    liveTitle: 'Return to the live, current frontline',
+    showingAsOf: function (d) { return 'Showing frontline as of end of ' + d; },
+    measureArea: function (a) { return 'Area: <span class="val">' + a + ' km²</span>'; },
+    measurePerimeter: function (p) { return 'Perimeter: <span class="val">' + p + ' km</span>'; },
+    measureHint: 'Click to add a point · Enter to finish · Esc to cancel',
+    deltaUnit: ' km²',
+    unnamed: 'Unnamed',
+    basemapMaps: 'Maps', basemapSatellite: 'Satellite', basemapTerrain: 'Terrain',
+    layerOsm: 'OSM', layerYandexMap: 'Yandex (RU)', layerGoogleRoads: 'Google Roads',
+    layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Yandex Hybrid', layerGoogleHybrid: 'Google Hybrid',
+    layerOpenTopo: 'OpenTopoMap',
+  },
+  ru: {
+    measure: '📐 Измерить',
+    measureTitle: 'Нарисуйте полигон, чтобы измерить площадь и периметр',
+    langToggleTitle: 'Switch to English',
+    loading: 'Загрузка…',
+    refreshed: function (time) { return 'Обновлено ' + time; },
+    loadingTerritory: 'Загрузка территории…',
+    territoryLoaded: 'Территория загружена',
+    controlAreasUnavailable: function (msg) { return 'Зоны контроля недоступны (' + msg + ')'; },
+    settlementZonesUnavailable: function (msg) { return 'Зоны населённых пунктов недоступны (' + msg + ')'; },
+    countAreas: function (n) { return n + ' ' + pluralRu(n, 'зона', 'зоны', 'зон'); },
+    countSettlements: function (n) { return n + ' ' + pluralRu(n, 'нас. пункт', 'нас. пункта', 'нас. пунктов'); },
+    statsHeader: 'Процент контролируемых территорий',
+    ruPct: function (p) { return p + '% РФ'; },
+    rowAreas: function (ru, ua) { return 'Россия: ' + ru + ' км² · Украина: ' + ua + ' км²'; },
+    historyDateTitle: 'Выберите дату, чтобы вернуть линию фронта к состоянию на конец этого дня',
+    live: '● Сейчас',
+    liveTitle: 'Вернуться к текущей линии фронта',
+    showingAsOf: function (d) { return 'Линия фронта на конец ' + d; },
+    measureArea: function (a) { return 'Площадь: <span class="val">' + a + ' км²</span>'; },
+    measurePerimeter: function (p) { return 'Периметр: <span class="val">' + p + ' км</span>'; },
+    measureHint: 'Клик — добавить точку · Enter — завершить · Esc — отмена',
+    deltaUnit: ' км²',
+    unnamed: 'Без названия',
+    basemapMaps: 'Карты', basemapSatellite: 'Спутник', basemapTerrain: 'Рельеф',
+    layerOsm: 'OSM', layerYandexMap: 'Яндекс (рус)', layerGoogleRoads: 'Google Дороги',
+    layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Яндекс Гибрид', layerGoogleHybrid: 'Google Гибрид',
+    layerOpenTopo: 'OpenTopoMap',
+  },
+};
+function t(key) { return STRINGS[currentLang][key]; }
+
+// Fixed, closed set of Ukraine's administrative regions — safe to hardcode rather than
+// plumb through the data pipeline. Keyed on the exact Ukrainian spelling territory_stats.json
+// already publishes (sourced from oblasts.geojson); unrecognised names fall back to it as-is.
+var OBLAST_NAMES = {
+  'Вінницька область':          { en: 'Vinnytsia Oblast',      ru: 'Винницкая область' },
+  'Волинська область':          { en: 'Volyn Oblast',          ru: 'Волынская область' },
+  'Дніпропетровська область':   { en: 'Dnipropetrovsk Oblast', ru: 'Днепропетровская область' },
+  'Донецька область':           { en: 'Donetsk Oblast',        ru: 'Донецкая область' },
+  'Житомирська область':        { en: 'Zhytomyr Oblast',       ru: 'Житомирская область' },
+  'Закарпатська область':       { en: 'Zakarpattia Oblast',    ru: 'Закарпатская область' },
+  'Запорізька область':         { en: 'Zaporizhzhia Oblast',   ru: 'Запорожская область' },
+  'Івано-Франківська область':  { en: 'Ivano-Frankivsk Oblast', ru: 'Ивано-Франковская область' },
+  'Київська область':           { en: 'Kyiv Oblast',           ru: 'Киевская область' },
+  'Кіровоградська область':     { en: 'Kirovohrad Oblast',     ru: 'Кировоградская область' },
+  'Луганська область':          { en: 'Luhansk Oblast',        ru: 'Луганская область' },
+  'Львівська область':          { en: 'Lviv Oblast',           ru: 'Львовская область' },
+  'Миколаївська область':       { en: 'Mykolaiv Oblast',       ru: 'Николаевская область' },
+  'Одеська область':            { en: 'Odesa Oblast',          ru: 'Одесская область' },
+  'Полтавська область':         { en: 'Poltava Oblast',        ru: 'Полтавская область' },
+  'Рівненська область':         { en: 'Rivne Oblast',          ru: 'Ровненская область' },
+  'Сумська область':            { en: 'Sumy Oblast',           ru: 'Сумская область' },
+  'Тернопільська область':      { en: 'Ternopil Oblast',       ru: 'Тернопольская область' },
+  'Харківська область':         { en: 'Kharkiv Oblast',        ru: 'Харьковская область' },
+  'Херсонська область':         { en: 'Kherson Oblast',        ru: 'Херсонская область' },
+  'Хмельницька область':        { en: 'Khmelnytskyi Oblast',   ru: 'Хмельницкая область' },
+  'Черкаська область':          { en: 'Cherkasy Oblast',       ru: 'Черкасская область' },
+  'Чернівецька область':        { en: 'Chernivtsi Oblast',     ru: 'Черновицкая область' },
+  'Чернігівська область':       { en: 'Chernihiv Oblast',      ru: 'Черниговская область' },
+  'Автономна Республіка Крим':  { en: 'Crimea',                ru: 'Республика Крым' },
+  'Севастополь':                { en: 'Sevastopol',            ru: 'Севастополь' },
+};
+function localizedOblastName(uaName) {
+  var entry = OBLAST_NAMES[uaName];
+  return entry ? entry[currentLang] : uaName;
+}
 
 // Russia's claimed administrative border within Ukraine — the full boundary of the 5 regions
 // formally annexed/claimed (Crimea, 2014; Donetsk, Luhansk, Zaporizhzhia, Kherson oblasts,
@@ -217,6 +336,8 @@ var openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
 });
 
 var map = L.map('map', { layers: [osm] }).setView([48.5, 33.5], 7);
+map.attributionControl.setPrefix(false); // drop the "Leaflet" branding link/flag, keep tile attributions
+L.control.scale({ position: 'bottomleft', imperial: false }).addTo(map);
 
 // Hand-rolled grouped basemap switcher — Leaflet's built-in L.control.layers has no concept
 // of groups. One radio group across all three sections; only ever one tile layer active.
@@ -255,23 +376,36 @@ function buildBasemapControl(groups) {
       return box;
     }
   });
-  map.addControl(new Ctl());
+  var instance = new Ctl();
+  map.addControl(instance);
+  return instance;
 }
-buildBasemapControl([
-  { title: 'Карты',   items: [
-    { label: 'OSM',              layer: osm },
-    { label: 'Яндекс (рус)',     layer: yandexRu },
-    { label: 'Google Дороги',    layer: googleRoads },
-  ] },
-  { title: 'Спутник', items: [
-    { label: 'Satellite (Esri)', layer: satellite },
-    { label: 'Яндекс Гибрид',    layer: yandexHybrid },
-    { label: 'Google Гибрид',    layer: googleHybrid },
-  ] },
-  { title: 'Рельеф',  items: [
-    { label: 'OpenTopoMap',      layer: openTopo },
-  ] },
-]);
+// Group headers and item labels come from t() (§ i18n above) so the switcher can be rebuilt
+// in the other language without losing which basemap is currently selected (selectBasemap
+// tracks that separately via activeBasemap, read fresh on every rebuild).
+function basemapGroups() {
+  return [
+    { title: t('basemapMaps'), items: [
+      { label: t('layerOsm'),         layer: osm },
+      { label: t('layerYandexMap'),   layer: yandexRu },
+      { label: t('layerGoogleRoads'), layer: googleRoads },
+    ] },
+    { title: t('basemapSatellite'), items: [
+      { label: t('layerSatelliteEsri'), layer: satellite },
+      { label: t('layerYandexHybrid'),  layer: yandexHybrid },
+      { label: t('layerGoogleHybrid'),  layer: googleHybrid },
+    ] },
+    { title: t('basemapTerrain'), items: [
+      { label: t('layerOpenTopo'), layer: openTopo },
+    ] },
+  ];
+}
+var basemapControlInstance = null;
+function rebuildBasemapControl() {
+  if (basemapControlInstance) map.removeControl(basemapControlInstance);
+  basemapControlInstance = buildBasemapControl(basemapGroups());
+}
+rebuildBasemapControl();
 
 // ── Fills: one pane, one canvas, opaque shapes ────────────────────────────────
 // Mirrors bootstrap.html and editor.html. Per-feature fillOpacity composites wherever
@@ -394,23 +528,24 @@ var errors = { zones: null, regions: null };
 function report() {
   var msgEl = document.getElementById('status-msg');
   var errMsgs = [];
-  if (errors.regions) errMsgs.push(errors.regions);
-  if (errors.zones)   errMsgs.push(errors.zones);
+  if (errors.regions) errMsgs.push(t('controlAreasUnavailable')(errors.regions));
+  if (errors.zones)   errMsgs.push(t('settlementZonesUnavailable')(errors.zones));
 
+  var stillLoading = counts.zones === null && counts.regions === null;
   if (errMsgs.length) {
     msgEl.textContent = errMsgs.join(' · ');
     msgEl.className = 'err';
   } else {
-    msgEl.textContent = 'Territory loaded';
+    msgEl.textContent = stillLoading ? t('loadingTerritory') : t('territoryLoaded');
     msgEl.className = '';
   }
 
   var z = counts.zones, r = counts.regions;
   document.getElementById('count').textContent =
-    (r === null ? '' : r + ' area' + (r !== 1 ? 's' : '') + ' · ')
-    + (z === null ? '' : z + ' settlement' + (z !== 1 ? 's' : ''));
+    (r === null ? '' : t('countAreas')(r) + ' · ')
+    + (z === null ? '' : t('countSettlements')(z));
   document.getElementById('last-updated').textContent =
-    'Refreshed ' + new Date().toLocaleTimeString();
+    stillLoading ? t('loading') : t('refreshed')(new Date().toLocaleTimeString());
 }
 
 // Settlement zones come from independent per-settlement raster grids (one WMS tile +
@@ -486,7 +621,7 @@ function loadRegions() {
     .catch(function (err) {
       // A repo with no wholesale territory yet is a valid state, not a failure.
       if (err.missing) { counts.regions = 0; errors.regions = null; }
-      else errors.regions = 'Control areas unavailable (' + err.message + ')';
+      else errors.regions = err.message;
       report();
     });
 }
@@ -508,7 +643,7 @@ function loadZones() {
     })
     .catch(function (err) {
       if (err.missing) { counts.zones = 0; errors.zones = null; }
-      else errors.zones = 'Settlement zones unavailable (' + err.message + ')';
+      else errors.zones = err.message;
       report();
     });
 }
@@ -521,28 +656,26 @@ var lastStats = null;
 
 function renderStats() {
   var box = document.getElementById('stats-widget');
-  var t = lastStats && lastStats.totals;
-  if (!t || !t.total_km2) { box.style.display = 'none'; return; }
+  var totals = lastStats && lastStats.totals;
+  if (!totals || !totals.total_km2) { box.style.display = 'none'; return; }
   box.style.display = 'block';
-  var pct = function (v) { return (100 * v / t.total_km2).toFixed(1) + '%'; };
+  var fmtArea = function (v) { return Math.round(v).toLocaleString(); };
 
   if (statsMinimized) {
-    box.innerHTML = '<div class="stats-head" id="stats-toggle">Percent of controlled territories ▸</div>';
+    box.innerHTML = '<div class="stats-head" id="stats-toggle">' + t('statsHeader') + ' ▸</div>';
   } else {
     var rows = lastStats.oblasts.slice()
+      .filter(function (o) { return o.total_km2 > 0 && (100 * o.russia_km2 / o.total_km2) >= 1; })
       .sort(function (a, b) { return b.russia_km2 - a.russia_km2; })
       .map(function (o) {
-        return '<div class="stats-row"><span>' + o.name + '</span><span>'
-          + (100 * o.russia_km2 / o.total_km2).toFixed(0) + '% RU</span></div>';
+        return '<div class="stats-row">'
+          + '<div class="stats-row-top"><span>' + localizedOblastName(o.name) + '</span><span>'
+          + t('ruPct')((100 * o.russia_km2 / o.total_km2).toFixed(0)) + '</span></div>'
+          + '<div class="stats-row-areas">' + t('rowAreas')(fmtArea(o.russia_km2), fmtArea(o.ukraine_km2)) + '</div>'
+          + '</div>';
       }).join('');
-    box.innerHTML = '<div class="stats-head" id="stats-toggle">Percent of controlled territories ▾</div>'
-      + '<div class="stats-summary">'
-      + '<div>Russia: <span class="val">' + pct(t.russia_km2) + '</span></div>'
-      + (t.contested_km2 > 0 ? '<div>Contested: <span class="val">' + pct(t.contested_km2) + '</span></div>' : '')
-      + '<div>Ukraine: <span class="val">' + pct(t.ukraine_km2) + '</span></div>'
-      + '<div class="stats-note">Within the ' + lastStats.oblasts.length + ' oblast'
-      + (lastStats.oblasts.length === 1 ? '' : 's') + ' with any non-Ukrainian presence</div>'
-      + '</div><div class="stats-list">' + rows + '</div>';
+    box.innerHTML = '<div class="stats-head" id="stats-toggle">' + t('statsHeader') + ' ▾</div>'
+      + '<div class="stats-list">' + rows + '</div>';
   }
   document.getElementById('stats-toggle').addEventListener('click', function () {
     statsMinimized = !statsMinimized;
@@ -566,13 +699,18 @@ function loadStats() {
 // day in between.
 var lastHistory = null;
 
+// Entries dated before this are edits made while wiring this feature up, not real
+// frontline changes — hidden from the public timeline. Real entries resume 2026-08-06.
+var HISTORY_VISIBLE_FROM = '2026-08-06';
+
 function loadHistory() {
   fetch('frontline_history.json?_=' + Date.now())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) {
-      lastHistory = data;
+      var entries = (data.entries || []).filter(function (e) { return e.date >= HISTORY_VISIBLE_FROM; });
+      lastHistory = Object.assign({}, data, { entries: entries });
       document.getElementById('history-panel').classList.remove('hidden');
-      var dates = data.entries.map(function (e) { return e.date; });
+      var dates = entries.map(function (e) { return e.date; });
       var dateInput = document.getElementById('history-date');
       if (dates.length) {
         dateInput.min = dates[0];
@@ -608,12 +746,15 @@ function renderEventsScroller() {
   cards.forEach(function (item) {
     var c = item.c;
     var delta = c.area_delta_km2 || 0;
+    // c.name is the canonical (Russian) name; c.name_en is optional and only shown in
+    // English mode, falling back to c.name when the operator never set one.
+    var displayName = (currentLang === 'en' && c.name_en) ? c.name_en : c.name;
     var el = document.createElement('div');
     el.className = 'event-card';
     el.innerHTML = '<div class="ec-date">' + item.date + '</div>'
-      + '<div class="ec-name">' + esc(c.name || 'Unnamed') + '</div>'
+      + '<div class="ec-name">' + esc(displayName || t('unnamed')) + '</div>'
       + '<div class="ec-delta ' + (delta >= 0 ? 'pos' : 'neg') + '">'
-      + (delta >= 0 ? '+' : '') + delta.toFixed(1) + ' km²</div>';
+      + (delta >= 0 ? '+' : '') + delta.toFixed(1) + t('deltaUnit') + '</div>';
     el.addEventListener('click', function () {
       var b = featureBoundsFromGeom(c.geometry || c.base_geometry);
       if (b && b.isValid()) map.fitBounds(b, { maxZoom: 12 });
@@ -687,7 +828,7 @@ function showHistoricalDate(targetDate) {
   restack();
   document.getElementById('history-live').classList.remove('active');
   document.getElementById('history-live').disabled = false;
-  document.getElementById('status-msg').textContent = 'Showing frontline as of end of ' + targetDate;
+  document.getElementById('status-msg').textContent = t('showingAsOf')(targetDate);
   document.getElementById('status-msg').className = '';
 }
 function showLive() {
@@ -775,9 +916,9 @@ function updateMeasureReadout() {
     areaKm2 = ringAreaM2(ring) / 1e6;
   }
   box.innerHTML = (measurePoints.length > 2
-      ? 'Area: <span class="val">' + areaKm2.toFixed(2) + ' km²</span><br>' : '')
-    + 'Perimeter: <span class="val">' + (perimM / 1000).toFixed(2) + ' km</span>'
-    + (measureActive ? '<div class="hint">Click to add a point · Enter to finish · Esc to cancel</div>' : '');
+      ? t('measureArea')(areaKm2.toFixed(2)) + '<br>' : '')
+    + t('measurePerimeter')((perimM / 1000).toFixed(2))
+    + (measureActive ? '<div class="hint">' + t('measureHint') + '</div>' : '');
 }
 
 function setMeasureActive(on) {
@@ -800,6 +941,44 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') { measurePoints = []; measureRedraw(); setMeasureActive(false); }
   else if (e.key === 'Enter') { setMeasureActive(false); }
 });
+
+// ── Language toggle ─────────────────────────────────────────────────────────────────
+// Re-renders every bit of UI chrome from t(); anything driven by live data (report(),
+// renderStats(), renderEventsScroller()) is safe to call any time since it reads current
+// state rather than caching text. The basemap switcher is rebuilt from scratch since its
+// labels are baked in at construction time by buildBasemapControl().
+function renderStaticChrome() {
+  // app-title is a fixed brand name — "CONFLICT MAP" stays in English in both languages,
+  // unlike everything else here, so it deliberately isn't driven by t().
+  var measureBtn = document.getElementById('tool-measure');
+  measureBtn.textContent = t('measure');
+  measureBtn.title = t('measureTitle');
+  var langBtn = document.getElementById('tool-lang');
+  langBtn.textContent = currentLang === 'en' ? 'RU' : 'EN';
+  langBtn.title = t('langToggleTitle');
+  document.getElementById('history-date').title = t('historyDateTitle');
+  var liveBtn = document.getElementById('history-live');
+  liveBtn.textContent = t('live');
+  liveBtn.title = t('liveTitle');
+}
+function setLanguage(lang) {
+  currentLang = lang;
+  localStorage.setItem(LANG_KEY, lang);
+  renderStaticChrome();
+  report();
+  renderStats();
+  renderEventsScroller();
+  rebuildBasemapControl();
+  updateMeasureReadout();
+  if (selectedDate) {
+    document.getElementById('status-msg').textContent = t('showingAsOf')(selectedDate);
+  }
+}
+document.getElementById('tool-lang').addEventListener('click', function () {
+  setLanguage(currentLang === 'en' ? 'ru' : 'en');
+});
+renderStaticChrome();
+report();
 
 refresh();
 setInterval(refresh, REFRESH_MS);
