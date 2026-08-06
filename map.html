@@ -180,7 +180,8 @@ var REFRESH_MS = 60000;
 
 // ── i18n: UI chrome only — settlement/place names are never translated here, see
 // docs/CONVENTIONS.md §6 (Russian/Ukrainian name matching is already a known gap upstream,
-// and zones.geojson stores only a single settlement_name — no ru/en variant to draw on).
+// and control_regions.geojson stores only a single canonical name plus the optional
+// name_en used above — no separate ru variant to draw on).
 var LANG_KEY = 'cv_lang';
 var currentLang = localStorage.getItem(LANG_KEY) === 'ru' ? 'ru' : 'en';
 function pluralRu(n, one, few, many) {
@@ -200,9 +201,7 @@ var STRINGS = {
     loadingTerritory: 'Loading territory…',
     territoryLoaded: 'Territory loaded',
     controlAreasUnavailable: function (msg) { return 'Control areas unavailable (' + msg + ')'; },
-    settlementZonesUnavailable: function (msg) { return 'Settlement zones unavailable (' + msg + ')'; },
     countAreas: function (n) { return n + ' area' + (n !== 1 ? 's' : ''); },
-    countSettlements: function (n) { return n + ' settlement' + (n !== 1 ? 's' : ''); },
     statsHeader: 'Percent of controlled territories',
     ruPct: function (p) { return p + '% RU'; },
     rowAreas: function (ru, ua) { return 'Russia: ' + ru + ' km² · Ukraine: ' + ua + ' km²'; },
@@ -229,9 +228,7 @@ var STRINGS = {
     loadingTerritory: 'Загрузка территории…',
     territoryLoaded: 'Территория загружена',
     controlAreasUnavailable: function (msg) { return 'Зоны контроля недоступны (' + msg + ')'; },
-    settlementZonesUnavailable: function (msg) { return 'Зоны населённых пунктов недоступны (' + msg + ')'; },
     countAreas: function (n) { return n + ' ' + pluralRu(n, 'зона', 'зоны', 'зон'); },
-    countSettlements: function (n) { return n + ' ' + pluralRu(n, 'нас. пункт', 'нас. пункта', 'нас. пунктов'); },
     statsHeader: 'Процент контролируемых территорий',
     ruPct: function (p) { return p + '% РФ'; },
     rowAreas: function (ru, ua) { return 'Россия: ' + ru + ' км² · Украина: ' + ua + ' км²'; },
@@ -421,8 +418,7 @@ map.getPane('fills').style.zIndex = 400;
 map.getPane('fills').style.opacity = '0.42';
 var fillsR = L.canvas({ pane: 'fills', padding: 0.3 });
 
-var regionLayer = null;   // control_regions.geojson — wholesale territory, drawn first
-var zoneLayer   = null;   // zones.geojson — per-settlement claims, drawn on top
+var regionLayer = null;   // control_regions.geojson — the only territory file now (CONVENTIONS §10)
 
 // Claimed-border overlay — a fixed reference line, not territory data, so it sits above the
 // 'fills' pane (z-index 400) and is always visible regardless of basemap or fill opacity.
@@ -433,13 +429,15 @@ map.getPane('claimedBorder').style.zIndex = 450;
 // A dark casing drawn first holds contrast on light and dark basemaps alike — a plain line
 // washed out badly over satellite imagery. Solid, semi-transparent, no dash — matches the
 // front-line style convention used elsewhere (thick translucent band, not a dashed outline).
+// Opacities are 30% lower than their original 0.35/0.65 — the line read as too heavy-handed
+// against the fills it sits above.
 L.polyline(CLAIMED_BORDER, {
   pane: 'claimedBorder', interactive: false,
-  color: '#3a0a1f', weight: 6, opacity: 0.35, lineJoin: 'round', lineCap: 'round',
+  color: '#3a0a1f', weight: 6, opacity: 0.245, lineJoin: 'round', lineCap: 'round',
 }).addTo(map);
 L.polyline(CLAIMED_BORDER, {
   pane: 'claimedBorder', interactive: false,
-  color: '#c2255c', weight: 4, opacity: 0.65, lineJoin: 'round', lineCap: 'round',
+  color: '#c2255c', weight: 4, opacity: 0.455, lineJoin: 'round', lineCap: 'round',
 }).addTo(map);
 
 // The 1px stroke is the fill colour, never a contrasting outline: it exists only to close
@@ -451,7 +449,7 @@ L.polyline(CLAIMED_BORDER, {
 // would mean a separate canvas and bring the cross-polygon blending problem back
 // (CONVENTIONS §10), so this stays on-canvas instead.
 // Recent-change variant per faction — highlights a feature changed within the last 24h (see
-// isRecentChange() and the style callbacks in loadRegions/loadZones below). Not simply
+// isRecentChange() and paintStyle()/isRecentRegion() below). Not simply
 // "brighter than base" for every faction: Ukraine's recent tint is a lighter blue than its
 // base colour, but Russia's is deliberately a darker red than its (now lighter) base colour —
 // newly-taken areas read as a deeper red against the lighter red of ground already held,
@@ -537,22 +535,6 @@ function factionBadge(fid) {
        + ';border:1px solid ' + f.color + '44">' + f.name + '</span>';
 }
 
-// Zones and regions are different documents with different schemas — a region has no
-// settlement_name, no areas and no source snippet, so it gets its own popup rather than
-// a shared one full of absent fields.
-function zonePopup(p) {
-  return '<div class="zone-popup">'
-    + '<h3>' + (p.settlement_name || "Unnamed") + '</h3>'
-    + factionBadge(p.faction)
-    + '<p class="meta">Updated: ' + formatDate(p.last_updated) + '</p>'
-    + (p.source          ? '<p class="meta">Source: ' + p.source + '</p>' : '')
-    + (p.source_channel  ? '<p class="meta">Channel: @' + p.source_channel + '</p>' : '')
-    + (p.admin_area_km2  ? '<p class="meta">Admin boundary: ' + p.admin_area_km2 + ' km²</p>' : '')
-    + (p.zone_area_km2   ? '<p class="meta">Controlled zone: ' + p.zone_area_km2 + ' km²</p>' : '')
-    + (p.source_snippet  ? '<p class="snippet">"' + p.source_snippet.substring(0, 120) + '…"</p>' : '')
-    + '</div>';
-}
-
 function regionPopup(p) {
   return '<div class="zone-popup">'
     + '<h3>' + (p.name || "Unnamed area") + '</h3>'
@@ -566,16 +548,15 @@ function regionPopup(p) {
 // The two files are independent documents fetched independently: one missing or
 // malformed must not blank the other. Counts are tracked separately so the status bar
 // can say which half is live.
-var counts = { zones: null, regions: null };
-var errors = { zones: null, regions: null };
+var counts = { regions: null };
+var errors = { regions: null };
 
 function report() {
   var msgEl = document.getElementById('status-msg');
   var errMsgs = [];
   if (errors.regions) errMsgs.push(t('controlAreasUnavailable')(errors.regions));
-  if (errors.zones)   errMsgs.push(t('settlementZonesUnavailable')(errors.zones));
 
-  var stillLoading = counts.zones === null && counts.regions === null;
+  var stillLoading = counts.regions === null;
   if (errMsgs.length) {
     msgEl.textContent = errMsgs.join(' · ');
     msgEl.className = 'err';
@@ -584,10 +565,8 @@ function report() {
     msgEl.className = '';
   }
 
-  var z = counts.zones, r = counts.regions;
-  document.getElementById('count').textContent =
-    (r === null ? '' : t('countAreas')(r) + ' · ')
-    + (z === null ? '' : t('countSettlements')(z));
+  var r = counts.regions;
+  document.getElementById('count').textContent = (r === null ? '' : t('countAreas')(r));
   document.getElementById('last-updated').textContent =
     stillLoading ? t('loading') : t('refreshed')(new Date().toLocaleTimeString());
 }
@@ -613,51 +592,297 @@ function closeGaps(fc) {
   return { type: 'FeatureCollection', features: out };
 }
 
-// Draw order inside the shared canvas is add order, and the two fetches race — so
-// ordering is asserted after each load rather than left to whichever returned last.
-function restack() {
-  if (zoneLayer && zoneLayer.bringToFront) { try { zoneLayer.bringToFront(); } catch (e) {} }
-}
-
 // Raw (pre-closeGaps) fetched data, kept so the historical calendar view (below) can
 // reconstruct a past date's state from the same source the live view uses.
-var rawZonesFC   = { type: 'FeatureCollection', features: [] };
 var rawRegionsFC = { type: 'FeatureCollection', features: [] };
 var selectedDate = null;   // non-null while viewing a past date instead of the live fetch
 
 // pane and renderer are constructor-time options — Leaflet applies them via geometryToLayer,
 // not via setStyle. Returning them from the style function alone silently drops both and
 // every fill lands in the default overlay pane at full opacity.
-// Regions are wholesale territory, often a huge oblast-sized shape — flagging the whole
-// thing "recent" for every geometry nudge (meld, cut, redraw, repair) reads as if the whole
-// oblast just changed hands when really a sliver got trimmed off one corner. Only a genuine
-// oblast-tool faction reassignment (or brand-new oblast-tool add) is newsworthy enough to
-// light up the whole shape, so this keys off faction_set_at — stamped ONLY by oblastClick()
-// in editor.html, never by geometry-only edits — not last_updated, which every touch-up
-// bumps. Zones stay keyed off last_updated as before: a settlement-sized area lighting up
-// for any edit (including an addition to it) is proportionate.
+// Oblast fills are wholesale territory, often huge — flagging the whole thing "recent" for
+// every geometry nudge (meld, cut, redraw, repair) reads as if the whole oblast just changed
+// hands when really a sliver got trimmed off one corner. Only a genuine oblast-tool faction
+// reassignment (or brand-new oblast-tool add) is newsworthy enough to light up the whole
+// shape, so an oblast keys off faction_set_at — stamped ONLY by oblastClick() in
+// editor.html, never by geometry-only edits — not last_updated, which every touch-up bumps.
+// Every other region (zone_type:"custom" — settlement-scale claims, including former
+// settlement zones now that CONVENTIONS §10 folded that schema in here, and hand-drawn
+// pockets) stays keyed off last_updated instead: an area that small lighting up for any
+// edit, including an addition to it, is proportionate the way a whole oblast is not.
 function isRecentRegion(p) {
-  return p.zone_type === 'oblast' && isRecentChange(p.faction_set_at);
+  return p.zone_type === 'oblast' ? isRecentChange(p.faction_set_at) : isRecentChange(p.last_updated);
 }
-function paintStyle(p, highlightIds, isRegion) {
-  var recent = highlightIds
-    ? highlightIds.has(p.id)
-    : isRegion ? isRecentRegion(p) : isRecentChange(p.last_updated);
+function paintStyle(p, highlightIds) {
+  var recent = highlightIds ? highlightIds.has(p.id) : isRecentRegion(p);
   return factionStyle(p.faction, p.pattern, recent);
 }
+
+// ── Contested-zone edge borders ─────────────────────────────────────────────────────
+// The contested hatch (CONVENTIONS §10 exempts this pattern from the no-coloured-borders
+// rule, same as it already exempts the pattern itself) reads as a muddy mid-tone at low
+// zoom, especially against a busy basemap — easy to miss that ground is contested at all
+// rather than assuming it belongs to whichever colour happens to dominate the hatch at that
+// pixel. This traces each contested polygon's outline and casings the stretches that
+// actually border Ukraine- or Russia-held ground in a darker shade of that faction's colour,
+// so the pocket reads at a glance before the hatch itself is legible.
+//
+// Classification is by proximity sampling, not exact polygon intersection: turf has no
+// "clip a line by a polygon" primitive, and exact computation over control_regions.geojson's
+// full feature set (several MB, oblast-sized polygons included) would be far too slow to
+// redo on every load and every historical date change. Instead each contested outline is
+// chunked into short segments; each segment's midpoint is classified by the nearest
+// same-tile neighbour's outline, bbox-prefiltered so only genuinely nearby features are
+// ever tested. Cosmetic only, like closeGaps() below — never written back to any data file.
+// PARKED 2026-08-06 — flip to true to bring the casings back. Everything below stays wired
+// up and callable; only the draw is switched off, so reviving this is a one-word change and
+// not an archaeology exercise. Turned off because the proximity-sampling classification was
+// still getting two things visibly wrong after the merge-chord fix, and the operator judged
+// further chasing not worth it for what is only a zoomed-out legibility aid:
+//
+//   1. Casings appearing along a boundary between two SOLID fills, nowhere near visible
+//      hatching. Unverified lead for whoever picks this up: fills are drawn into one shared
+//      canvas in array order, last-drawn winning (see §3.5 "Rendering model"), so a contested
+//      region sitting under a later solid region is invisible as a fill — but its outline is
+//      still in the data, and this runs off the data in its own pane above 'fills'. If that
+//      is it, the fix is to classify against what is actually VISIBLE, not against every
+//      contested feature in the file.
+//   2. Casings missing from stretches of hatching that plainly do border a faction. Several
+//      candidates, none confirmed: CONTESTED_EDGE_MATCH_M (80m) is too tight for the real
+//      gaps between abutting fills; the sub-polygon carrying that stretch fell under
+//      CONTESTED_EDGE_MIN_PART_M2 and was dropped as debris; or the 500m chunk's midpoint
+//      lands somewhere unrepresentative of the chunk.
+//
+// Both point the same way: sampling midpoints against nearby outlines approximates a
+// question — "is this stretch of edge against Ukraine or Russia?" — that really wants
+// polygon clipping. Reviving this probably means paying for exactness somewhere, not
+// retuning the thresholds again.
+var CONTESTED_EDGES_ENABLED = false;
+
+map.createPane('contestedEdge');
+map.getPane('contestedEdge').style.zIndex = 420;   // above 'fills' (400), below 'claimedBorder' (450)
+var contestedEdgeGroup = L.layerGroup().addTo(map);
+
+var CONTESTED_EDGE_COLORS = { ukraine: '#1d4ed8', russia: '#b91c1c' };  // darker than FACTIONS' own blue/red, not as dark as navy/maroon
+var CONTESTED_EDGE_SEGMENT_M = 500;  // outline chunk length before classifying each piece — see
+                                      // the sizing note above outlineLinesOf() for why this isn't smaller
+var CONTESTED_EDGE_MATCH_M   = 80;   // must be at least this close to a neighbour to count as
+                                      // bordering it — past GAP_CLOSE_M (15m) so real-world gaps
+                                      // between abutting fills still read as touching
+var CONTESTED_EDGE_MIN_PART_M2 = 5000;   // sub-polygons smaller than this are geometry noise
+                                          // (meld/cut/repair debris), not real disputed ground —
+                                          // see the sizing note above outlineLinesOf()
+
+// polygonToLine() on a single Feature<Polygon|MultiPolygon> returns one Feature whose
+// geometry is LineString (no holes) or MultiLineString (has holes, or multiple parts) —
+// never a FeatureCollection, that only happens when the input itself is one. Flattened here
+// into a plain array of LineString features either way, so every caller below has one shape
+// to iterate regardless of which case it was.
+function linesOf(lineFeature) {
+  if (!lineFeature || !lineFeature.geometry) return [];
+  var g = lineFeature.geometry;
+  if (g.type === 'LineString') return [lineFeature];
+  if (g.type === 'MultiLineString') return g.coordinates.map(function (cs) { return turf.lineString(cs); });
+  return [];
+}
+// Real features in this dataset carry degenerate sliver sub-polygons left over from past
+// meld/cut/repair passes — rings as short as two identical points. turf.polygonToLine()
+// throws on the WHOLE MultiPolygon the moment it meets one, which silently dropped every
+// border for a feature that had even a single sliver anywhere in it (most of them, in
+// practice — this is how "only one contested pocket has edges" happened). Converting each
+// sub-polygon independently, skipping only the ones actually degenerate, isolates the bad
+// ring from the 300+ good vertices sitting right next to it in the same feature.
+//
+// Sizing note (CONTESTED_EDGE_SEGMENT_M / _MIN_PART_M2 above): one real contested feature in
+// this dataset turned out to carry 57 sub-polygons, 51 of them slivers under a few square
+// metres — debris, not disputed ground. At a 50m chunk length those 51 slivers plus the
+// genuinely large (and genuinely wiggly — real front lines are not straight) sub-polygons
+// elsewhere in the dataset added up to 37,000+ chunks across a dozen contested features, each
+// needing several point-to-line distance checks — that combination is what froze the tab.
+// Dropping sub-polygons under CONTESTED_EDGE_MIN_PART_M2 removes the debris outright (it was
+// never going to carry a meaningful border anyway); even after that, the real geometry alone
+// still produced ~9,000 chunks at 200m and only dropped to ~3,500 at 500m, so 500m is the
+// value actually measured to bring a full rebuild from ~6s to ~0.6s on this dataset — both
+// changes justified by this being a zoomed-out visibility aid, not a precise boundary trace,
+// so sub-500m resolution was never buying anything visible.
+function polygonPartsOf(geom) {
+  if (!geom) return [];
+  if (geom.type === 'Polygon') return [geom.coordinates];
+  if (geom.type === 'MultiPolygon') return geom.coordinates;
+  return [];
+}
+function outlineLinesOf(feature) {
+  var lines = [];
+  polygonPartsOf(feature.geometry).forEach(function (rings) {
+    var validRings = rings.filter(function (r) { return Array.isArray(r) && r.length >= 4; });
+    if (!validRings.length) return;   // this sub-polygon is nothing but slivers — skip it, not the whole feature
+    try {
+      var poly = turf.polygon(validRings);
+      if (turf.area(poly) < CONTESTED_EDGE_MIN_PART_M2) return;   // debris — see sizing note above
+      lines = lines.concat(linesOf(turf.polygonToLine(poly)));
+    } catch (e) {}
+  });
+  return lines;
+}
+function nearestDistanceToLinesM(point, lines) {
+  var best = Infinity;
+  lines.forEach(function (line) {
+    try {
+      var d = turf.pointToLineDistance(point, line, { units: 'meters' });
+      if (d < best) best = d;
+    } catch (e) {}
+  });
+  return best;
+}
+// Clips each candidate line down to the small area actually near the contested pocket
+// before it's used for distance testing. Without this, a contested pocket sitting against
+// one corner of an oblast-sized neighbour (thousands of vertices, running for hundreds of
+// kilometres) forces every one of that neighbour's points to be distance-checked against
+// every chunked segment of the pocket's own outline — the combination is what made a
+// full-size control_regions.geojson freeze the tab. Clipped, only the handful of points
+// actually near this pocket are ever tested, regardless of how large the neighbour is.
+function clipLinesToBbox(lines, bbox) {
+  var out = [];
+  lines.forEach(function (line) {
+    var clipped; try { clipped = turf.bboxClip(line, bbox); } catch (e) { return; }
+    linesOf(clipped).forEach(function (l) { if (l.geometry.coordinates.length >= 2) out.push(l); });
+  });
+  return out;
+}
+// Consecutive same-class segments become one polyline instead of many short ones — fewer
+// draws, and the casing reads as one continuous edge rather than a dashed row of ticks.
+//
+// "Consecutive" has to mean adjacent ON THE OUTLINE, not merely adjacent in this array.
+// Unclassified chunks are dropped before they ever get here, and a single contested feature
+// contributes several separate outlines (sub-polygons, holes), so two array neighbours are
+// routinely two stretches tens of kilometres apart. Joining those drew a straight casing-
+// coloured chord from one to the other, straight across whatever solid fill lay between —
+// long diagonal lines cutting through Sumy, Vovchansk and Kramatorsk. Each segment therefore
+// carries which outline it came from and its position along that outline, and a run only
+// continues while those say the next segment literally starts where the current one ended.
+function drawMergedEdgeSegments(segments) {
+  var i = 0;
+  while (i < segments.length) {
+    var cls = segments[i].cls;
+    var pts = segments[i].latlngs.slice();
+    var j = i + 1;
+    while (j < segments.length && segments[j].cls === cls
+        && segments[j].lineIdx === segments[j - 1].lineIdx
+        && segments[j].chunkIdx === segments[j - 1].chunkIdx + 1) {
+      pts = pts.concat(segments[j].latlngs.slice(1));
+      j++;
+    }
+    L.polyline(pts, {
+      pane: 'contestedEdge', interactive: false,
+      color: CONTESTED_EDGE_COLORS[cls], weight: 2.5, opacity: 0.6, lineJoin: 'round', lineCap: 'round',
+    }).addTo(contestedEdgeGroup);
+    i = j;
+  }
+}
+function buildContestedEdges(features) {
+  contestedEdgeGroup.clearLayers();   // runs even when parked, so flipping the flag off mid-session clears what is already drawn
+  if (!CONTESTED_EDGES_ENABLED) return;   // see the PARKED note above
+  if (typeof turf === 'undefined') return;
+
+  // Both memoised per call, not across calls: a feature's geometry can change between builds
+  // (edit, undo, reload) and a cache that outlived that would show stale borders. Within one
+  // call, though, the same oblast-sized neighbour is routinely "near" a dozen different
+  // contested pockets — computing its bbox and full outline once instead of once per pocket
+  // is most of what makes this affordable at all on a full-size dataset.
+  var bboxCache = new Map();
+  function bboxOf(f) {
+    if (bboxCache.has(f)) return bboxCache.get(f);
+    var b = null; try { b = turf.bbox(f); } catch (e) {}
+    bboxCache.set(f, b);
+    return b;
+  }
+  var outlineCache = new Map();
+  function cachedOutlineOf(f) {
+    if (outlineCache.has(f)) return outlineCache.get(f);
+    var lines = outlineLinesOf(f);
+    outlineCache.set(f, lines);
+    return lines;
+  }
+
+  var contested = [], ukraine = [], russia = [];
+  features.forEach(function (f) {
+    if (!f.geometry) return;
+    if (!bboxOf(f)) return;
+    var fid = (f.properties || {}).faction;
+    if (fid === 'contested') contested.push(f);
+    else if (fid === 'ukraine') ukraine.push(f);
+    else if (fid === 'russia') russia.push(f);
+  });
+  if (!contested.length || (!ukraine.length && !russia.length)) return;
+
+  // Rough metres→degrees at these latitudes, padded generously — this only has to be wide
+  // enough that the bbox prefilter never rejects a genuine neighbour, not tight.
+  var marginDeg = (CONTESTED_EDGE_MATCH_M / 75000) * 4;
+  function bboxesNear(a, b) {
+    return a[0] - marginDeg <= b[2] && b[0] - marginDeg <= a[2]
+        && a[1] - marginDeg <= b[3] && b[1] - marginDeg <= a[3];
+  }
+
+  contested.forEach(function (c) {
+    var cbbox = bboxOf(c);
+    // Expanded past the bbox prefilter's own margin so the clip can't cut off a neighbour
+    // point that would otherwise have been the nearest one within CONTESTED_EDGE_MATCH_M.
+    var clipBbox = [cbbox[0] - marginDeg, cbbox[1] - marginDeg, cbbox[2] + marginDeg, cbbox[3] + marginDeg];
+    var nearLinesU = [], nearLinesR = [], nearLinesC = [];
+    ukraine.forEach(function (u) {
+      if (!bboxesNear(cbbox, bboxOf(u))) return;
+      nearLinesU = nearLinesU.concat(clipLinesToBbox(cachedOutlineOf(u), clipBbox));
+    });
+    russia.forEach(function (r) {
+      if (!bboxesNear(cbbox, bboxOf(r))) return;
+      nearLinesR = nearLinesR.concat(clipLinesToBbox(cachedOutlineOf(r), clipBbox));
+    });
+    // Where this contested pocket borders ANOTHER contested pocket rather than a real
+    // faction, that shared stretch must stay uncoloured — it is not a claim boundary. A pure
+    // "only ukraine/russia are candidates" filter already keeps contested-contested pairs
+    // from being compared directly, but is not airtight on its own: a segment right at a
+    // shared edge can still sit within CONTESTED_EDGE_MATCH_M of some OTHER real faction
+    // polygon nearby, through the neighbouring contested pocket, and get miscoloured as if
+    // it bordered that faction directly. Tracking every other nearby contested pocket's
+    // outline here and requiring it be the closest thing before colouring anything closes
+    // that gap explicitly, rather than relying on the general case happening to work out.
+    contested.forEach(function (c2) {
+      if (c2 === c || !bboxesNear(cbbox, bboxOf(c2))) return;
+      nearLinesC = nearLinesC.concat(clipLinesToBbox(cachedOutlineOf(c2), clipBbox));
+    });
+    if (!nearLinesU.length && !nearLinesR.length) return;
+
+    var segments = [];
+    cachedOutlineOf(c).forEach(function (line, lineIdx) {
+      var chunks; try { chunks = turf.lineChunk(line, CONTESTED_EDGE_SEGMENT_M, { units: 'meters' }); } catch (e) { return; }
+      chunks.features.forEach(function (seg, chunkIdx) {
+        var coords = seg.geometry.coordinates;
+        if (coords.length < 2) return;
+        var mid = turf.midpoint(turf.point(coords[0]), turf.point(coords[coords.length - 1]));
+        var dU = nearestDistanceToLinesM(mid, nearLinesU);
+        var dR = nearestDistanceToLinesM(mid, nearLinesR);
+        var dC = nearLinesC.length ? nearestDistanceToLinesM(mid, nearLinesC) : Infinity;
+        var cls = null;
+        if (dU <= CONTESTED_EDGE_MATCH_M && dU <= dR && dU < dC) cls = 'ukraine';
+        else if (dR <= CONTESTED_EDGE_MATCH_M && dR < dU && dR < dC) cls = 'russia';
+        if (!cls) return;
+        segments.push({
+          cls: cls, lineIdx: lineIdx, chunkIdx: chunkIdx,
+          latlngs: coords.map(function (xy) { return [xy[1], xy[0]]; }),
+        });
+      });
+    });
+    drawMergedEdgeSegments(segments);
+  });
+}
+
 function renderRegionsLayer(data, highlightIds) {
   if (regionLayer) map.removeLayer(regionLayer);
   regionLayer = L.geoJSON(closeGaps(data), {
     pane: 'fills', renderer: fillsR,
-    style: function (f) { return paintStyle(f.properties || {}, highlightIds, true); },
+    style: function (f) { return paintStyle(f.properties || {}, highlightIds); },
   }).addTo(map);
-}
-function renderZonesLayer(data, highlightIds) {
-  if (zoneLayer) map.removeLayer(zoneLayer);
-  zoneLayer = L.geoJSON(closeGaps(data), {
-    pane: 'fills', renderer: fillsR,
-    style: function (f) { return paintStyle(f.properties || {}, highlightIds, false); },
-  }).addTo(map);
+  buildContestedEdges(data.features || []);
 }
 
 function loadRegions() {
@@ -672,35 +897,12 @@ function loadRegions() {
       if (!selectedDate) renderRegionsLayer(data, null);
       counts.regions = (data.features || []).length;
       errors.regions = null;
-      restack();
       report();
     })
     .catch(function (err) {
       // A repo with no wholesale territory yet is a valid state, not a failure.
       if (err.missing) { counts.regions = 0; errors.regions = null; }
       else errors.regions = err.message;
-      report();
-    });
-}
-
-function loadZones() {
-  fetch('zones.geojson?_=' + Date.now())
-    .then(function (r) {
-      if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function (data) {
-      rawZonesFC = data;
-      if (!selectedDate) renderZonesLayer(data, null);
-      counts.zones = (data.features || []).length;
-      errors.zones = null;
-      restack();
-      report();
-    })
-    .catch(function (err) {
-      if (err.missing) { counts.zones = 0; errors.zones = null; }
-      else errors.zones = err.message;
       report();
     });
 }
@@ -823,14 +1025,16 @@ function renderEventsScroller() {
 function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
 // Reconstructs state as of the end of targetDate (YYYY-MM-DD) from the live raw fetch plus
-// every history entry dated after it. Returns { zones, regions, changedZoneIds, changedRegionIds }.
+// every history entry dated after it. Returns { regions, changedIds }.
+// Entries inside the retention window may still carry kind:"zone" from before CONVENTIONS
+// §10 folded settlement zones into regions — kind is read only as a display fallback below,
+// never to route a feature into a separate bucket. The id is what ties an entry to a live
+// feature (preserved across the migration — see migrateZonesToRegions() in editor.html), so
+// resolving by id alone into one bucket replays correctly on both sides of that migration.
 function reconstructStateAsOf(targetDate) {
-  var working = new Map();   // id -> { kind, feature }
-  (rawZonesFC.features || []).forEach(function (f) {
-    if (f.properties && f.properties.id) working.set(f.properties.id, { kind: 'zone', f: f });
-  });
+  var working = new Map();   // id -> feature
   (rawRegionsFC.features || []).forEach(function (f) {
-    if (f.properties && f.properties.id) working.set(f.properties.id, { kind: 'region', f: f });
+    if (f.properties && f.properties.id) working.set(f.properties.id, f);
   });
 
   var earliest = new Map();  // id -> change, from the earliest date > targetDate
@@ -848,46 +1052,38 @@ function reconstructStateAsOf(targetDate) {
       return;
     }
     if (c.action === 'remove') {
-      var nameKey = c.kind === 'zone' ? 'settlement_name' : 'name';
-      var props = { id: id };
-      props[nameKey] = c.prev_name || c.name;
-      props.faction = c.prev_faction;
-      working.set(id, { kind: c.kind, f: { type: 'Feature', properties: props, geometry: c.base_geometry } });
+      var props = { id: id, name: c.prev_name || c.name, faction: c.prev_faction };
+      working.set(id, { type: 'Feature', properties: props, geometry: c.base_geometry });
       return;
     }
     // update
     var cur = working.get(id);
     if (!cur) return;
-    var props2 = Object.assign({}, cur.f.properties);
+    var props2 = Object.assign({}, cur.properties);
     if (c.prev_faction) props2.faction = c.prev_faction;
-    if (c.prev_name) props2[c.kind === 'zone' ? 'settlement_name' : 'name'] = c.prev_name;
-    working.set(id, {
-      kind: cur.kind,
-      f: { type: 'Feature', properties: props2, geometry: c.base_geometry || cur.f.geometry },
-    });
+    if (c.prev_name) props2.name = c.prev_name;
+    working.set(id, { type: 'Feature', properties: props2, geometry: c.base_geometry || cur.geometry });
   });
 
-  var zones = [], regions = [];
-  working.forEach(function (v) { (v.kind === 'zone' ? zones : regions).push(v.f); });
+  var regions = [];
+  working.forEach(function (f) { regions.push(f); });
 
-  // Same rule as isRecentRegion() for the live view: a region only belongs in the
+  // Same rule as isRecentRegion() for the live view: an oblast only belongs in the
   // "changed" set if the change was a genuine oblast-tool faction event (add or
   // reassignment), not a geometry-only touch-up — otherwise browsing history would light
   // up a whole oblast for every meld/cut/redraw that happened to land on target date + 1.
-  var changedZoneIds = new Set(), changedRegionIds = new Set();
+  // Everything else (settlement-scale, oblast or not) is always newsworthy at its own size.
+  var changedIds = new Set();
   earliest.forEach(function (c, id) {
-    if (c.kind === 'zone') { changedZoneIds.add(id); return; }
     var cur = working.get(id);
-    var isOblast = cur && cur.f && cur.f.properties && cur.f.properties.zone_type === 'oblast';
+    var isOblast = cur && cur.properties && cur.properties.zone_type === 'oblast';
     var isFactionEvent = c.action === 'add' || (c.fields || []).indexOf('faction') !== -1;
-    if (isOblast && isFactionEvent) changedRegionIds.add(id);
+    if (!isOblast || isFactionEvent) changedIds.add(id);
   });
 
   return {
-    zones: { type: 'FeatureCollection', features: zones },
     regions: { type: 'FeatureCollection', features: regions },
-    changedZoneIds: changedZoneIds,
-    changedRegionIds: changedRegionIds,
+    changedIds: changedIds,
   };
 }
 
@@ -895,9 +1091,7 @@ function showHistoricalDate(targetDate) {
   if (!lastHistory) return;
   selectedDate = targetDate;
   var result = reconstructStateAsOf(targetDate);
-  renderRegionsLayer(result.regions, result.changedRegionIds);
-  renderZonesLayer(result.zones, result.changedZoneIds);
-  restack();
+  renderRegionsLayer(result.regions, result.changedIds);
   document.getElementById('history-live').classList.remove('active');
   document.getElementById('history-live').disabled = false;
   document.getElementById('status-msg').textContent = t('showingAsOf')(targetDate);
@@ -908,8 +1102,6 @@ function showLive() {
   document.getElementById('history-date').value = '';
   document.getElementById('history-live').classList.add('active');
   renderRegionsLayer(rawRegionsFC, null);
-  renderZonesLayer(rawZonesFC, null);
-  restack();
   report();
 }
 
@@ -918,7 +1110,7 @@ document.getElementById('history-date').addEventListener('change', function (e) 
 });
 document.getElementById('history-live').addEventListener('click', showLive);
 
-function refresh() { loadRegions(); loadZones(); loadStats(); loadHistory(); }
+function refresh() { loadRegions(); loadStats(); loadHistory(); }
 
 // ── Measure tool: draw a polygon, report area (km²) and perimeter (km) ─────────────
 // A public-viewer aid, not territory data — its own pane with a dashed outline, so it
