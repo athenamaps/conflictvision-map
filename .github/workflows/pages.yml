@@ -10,6 +10,10 @@ permissions:
   pages: write
   id-token: write
 
+# Left at false deliberately. A single editor save still arrives as up to five push events a
+# couple of seconds apart (one Contents-API commit per published file), and each SHA carries
+# only a partial file set — collapsing the burst risks publishing the earliest SHA last. Now
+# that deployments are no longer cancelled, serialising them is slow but always correct.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -18,7 +22,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: https://athenamaps.github.io/conflictvision-map/
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +30,43 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+
+      # Deployments on this repo sit in `deployment_queued` for just under ten minutes; the one
+      # that landed on 2026-08-06 took 9m43s. actions/deploy-pages hard-caps its own wait at
+      # MAX_TIMEOUT = 600000 ms, so a larger `timeout:` input is silently clamped (that is why
+      # the 20-minute value tried earlier changed nothing) — and on hitting the cap it does not
+      # merely fail, it *cancels* the pending deployment. Every failure so far was the action
+      # killing a deployment that was minutes from succeeding.
+      #
+      # So stop it before it can reach that path. `timeout-minutes` makes the runner kill the
+      # step, and the action declares no `post:` hook, so nothing runs the cancel — the
+      # deployment is left alone to finish server-side. The step below then watches it land.
       - id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          # Default is 600000 (10 min). Deployments on this repo have been taking close to
-          # that just to leave "queued" — several genuine attempts got killed by the default
-          # right as they were about to land. Doubling it trades a slower worst-case failure
-          # for actually giving slow-but-working deployments room to finish.
-          timeout: 1200000
+        timeout-minutes: 9
+        continue-on-error: true
+
+      # Only runs when the action above was cut off mid-poll. Reports the real outcome without
+      # ever cancelling, so a slow-but-healthy deployment gets to finish.
+      - name: Wait for the deployment to land
+        if: steps.deployment.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(gh api "repos/$GITHUB_REPOSITORY/pages/deployments/$GITHUB_SHA" --jq '.status' || echo unknown_status)
+            echo "Current status: ${status:-<empty>}"
+            case "$status" in
+              succeed)
+                echo "Deployment landed."
+                exit 0
+                ;;
+              deployment_failed|deployment_content_failed|deployment_cancelled|deployment_lost)
+                echo "::error::Pages reported a final error status: $status"
+                exit 1
+                ;;
+            esac
+            sleep 15
+          done
+          echo "::error::Deployment still not finished after 15 further minutes (last status: $status)"
+          exit 1
