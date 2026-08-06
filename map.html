@@ -171,7 +171,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 // rather than assuming exactly two sides.
 var FACTIONS = {
   "ukraine":   { name: "Ukraine",   color: "#3b82f6" },
-  "russia":    { name: "Russia",    color: "#ef4444" },
+  "russia":    { name: "Russia",    color: "#f87171" },
   "contested": { name: "Contested", color: "#f59e0b" },
   "neutral":   { name: "Neutral",   color: "#9ca3af" },
 };
@@ -304,7 +304,6 @@ function localizedOblastName(uaName) {
 // To adjust, edit the coordinates directly or regenerate via regenerate_claimed_border.py
 // from an updated oblasts.geojson.
 var CLAIMED_BORDER = [
-  [[46.48497,31.81808],[46.52003,31.85001]],
   [[46.72739,31.96965],[46.72617,32.01672],[46.74677,32.07196],[46.73523,32.11215],[46.74167,32.15463],[46.75807,32.18712],[46.80496,32.22266],[46.81058,32.25925],[46.79667,32.34537],[46.79864,32.34739],[46.7983,32.34948],[46.83951,32.38931],[46.84711,32.44424],[46.83133,32.46967],[46.8317,32.51483],[46.84421,32.53497],[46.87401,32.54386],[46.86603,32.5976],[46.85535,32.64838],[46.85158,32.65521],[46.84452,32.67763],[46.83603,32.68852],[46.82579,32.70598],[46.82783,32.82508],[46.85953,32.93254],[46.86232,32.9337],[46.86536,32.91886],[46.86768,32.87539],[46.86804,32.82645],[46.86963,32.81879],[46.87414,32.81069],[46.88223,32.80701],[46.88284,32.8105],[46.88532,32.81139],[46.89122,32.84514],[46.90165,32.91824],[46.93777,33.0096],[46.94148,33.00837],[46.94227,33.00474],[46.94478,33.00391],[46.94608,33.00011],[46.94962,32.98141],[46.95073,32.96539],[46.95355,32.95706],[46.95838,32.95678],[46.96446,32.95312],[46.97941,32.95224],[46.9906,32.9549],[47.00021,32.97492],[46.97519,33.02567],[47.01027,33.05851],[47.01756,33.0576],[47.03477,33.03292],[47.05106,33.01355],[47.07733,32.92184],[47.1001,32.91531],[47.18675,32.97628],[47.18625,32.97963],[47.1879,32.9808],[47.17792,33.03589],[47.20892,33.08383],[47.20837,33.08695],[47.20993,33.08957],[47.20242,33.12064],[47.21655,33.13055],[47.22788,33.13396],[47.276,33.10468],[47.3494,33.12064],[47.38511,33.09335],[47.38858,33.04767],[47.39008,33.04269],[47.40298,33.02819],[47.40539,33.02969],[47.40753,33.0274],[47.45062,33.05527],[47.44883,33.05678],[47.45143,33.0584],[47.41558,33.08888],[47.41685,33.10344],[47.42205,33.12763],[47.50607,33.11096],[47.52692,33.11768],[47.55136,33.08801],[47.57712,33.08904],[47.57776,33.08572],[47.58006,33.08581],[47.53931,33.28342],[47.49573,33.3335],[47.51489,33.36948],[47.52991,33.47675],[47.53271,33.48526],[47.53497,33.48898],[47.55014,33.49173],[47.56461,33.4971],[47.57535,33.56287],[47.56166,33.58601],[47.53757,33.57529],[47.51529,33.58418],[47.5131,33.60504],[47.50835,33.62692],[47.49078,33.6447],[47.48682,33.65439],[47.49265,33.72641],[47.4933,33.75246],[47.51443,33.90176],[47.48071,34.0582],[47.47783,34.10024],[47.47614,34.15717],[47.47665,34.17369],[47.47869,34.1856],[47.47849,34.19794],[47.52286,34.44592],[47.5686,34.5946],[47.55571,34.65395],[47.54134,34.7306],[47.52866,34.81738],[47.52641,34.84108],[47.52728,34.85565],[47.52555,34.89745],[47.52782,34.90278],[47.52825,34.91003],[47.53085,34.91614],[47.56414,34.92886],[47.57357,34.92468],[47.60425,34.89731],[47.73892,34.94537],[47.74002,34.94229],[47.74228,34.94304],[47.74338,34.93995],[47.74462,34.94037],[47.75382,34.9039],[47.75759,34.89339],[47.76029,34.8929],[47.76143,34.88973],[47.79615,34.8876],[47.82419,34.90384],[47.82627,34.90226],[47.82889,34.90353],[47.83613,34.89322],[47.85098,34.85974],[47.86954,34.82385],[47.87963,34.81077],[47.88348,34.80852],[47.90448,34.81851],[47.90897,34.82564],[47.91369,34.83808],[47.92007,34.84824],[47.93096,34.89049],[47.93814,34.90946],[47.94144,34.91134],[47.94284,34.91504],[47.94683,34.91443],[47.95114,34.9169],[47.96479,34.91009],[47.96599,34.90539],[47.96838,34.90353],[47.98176,34.85524],[48.00653,34.84222],[48.01184,34.83083],[48.01317,34.82217],[48.01896,34.81557],[48.02155,34.81581],[48.04129,34.84021],[48.10858,34.83588],[48.12062,34.8491],[48.11996,34.85964],[48.11633,34.87033],[48.08198,34.88203],[48.08087,34.88599],[48.08096,34.94311],[48.11941,35.02863],[48.13019,35.24509],[48.10397,35.34003],[48.07938,35.51474],[48.07945,35.52133],[48.11633,35.60431],[48.12698,35.6741],[48.09592,35.7323],[48.08606,35.78857],[48.06709,35.81032],[48.06771,35.81399],[48.06595,35.81644],[48.0901,35.95572],[48.08137,35.96465],[48.03177,35.97223],[48.02625,35.98975],[48.04327,36.04468],[48.02162,36.0303],[48.00668,36.02286],[48.00536,36.02578],[48.00317,36.02468],[47.994,36.05088],[47.95383,36.0588],[47.95293,36.06242],[47.9504,36.06301],[47.93688,36.11495],[47.90683,36.11641],[47.87726,36.09843],[47.87609,36.09403],[47.8732,36.0922],[47.87113,36.08441],[47.87163,36.07717],[47.86986,36.07046],[47.86959,36.06033],[47.86758,36.06184],[47.86697,36.05957],[47.84515,36.07864],[47.841,36.098],[47.83807,36.10484],[47.83696,36.13891],[47.83789,36.15222],[47.86276,36.20343],[47.83029,36.21491],[47.81329,36.28598],[47.81515,36.31842],[47.81775,36.32523],[47.83773,36.35753],[47.82568,36.39197],[47.84398,36.57385],[47.84178,36.57427],[47.84198,36.57646],[47.86734,36.56946],[47.88606,36.53381],[47.90889,36.54127],[47.92709,36.63278],[47.957,36.6134],[47.9707,36.5766],[48.05823,36.57504],[48.0745,36.58724],[48.07732,36.59087],[48.07832,36.59558],[48.08804,36.66507],[48.082,36.68257],[48.07802,36.70134],[48.06914,36.72701],[48.06495,36.73189],[48.0625,36.73897],[48.05831,36.74385],[48.05447,36.75255],[48.03836,36.80862],[48.03462,36.82688],[48.03627,36.83017],[48.03545,36.83417],[48.0526,36.86837],[48.06753,36.89255],[48.16316,36.8728],[48.16663,36.8755],[48.20191,36.92706],[48.26379,36.91379],[48.29902,36.90103],[48.30795,36.88134],[48.31104,36.86857],[48.31612,36.85735],[48.32221,36.81265],[48.41312,36.80893],[48.42953,36.84274],[48.43136,36.84246],[48.43308,36.84561],[48.47632,36.83545],[48.49264,36.85855],[48.51582,36.85757],[48.52488,36.87425],[48.53015,36.88867],[48.53267,36.8886],[48.53397,36.89099],[48.55066,36.88808],[48.57361,36.88742],[48.57394,36.88402],[48.57623,36.88362],[48.57708,36.88004],[48.57957,36.84955],[48.57977,36.82443],[48.53479,36.79507],[48.5314,36.75473],[48.5336,36.75411],[48.53341,36.75182],[48.54349,36.7513],[48.55817,36.74713],[48.59594,36.78885],[48.59793,36.78672],[48.59993,36.78872],[48.60131,36.78724],[48.60148,36.78291],[48.60381,36.78041],[48.60604,36.73336],[48.62805,36.7244],[48.62753,36.7216],[48.64957,36.71085],[48.66083,36.70853],[48.71421,36.70587],[48.75737,36.69619],[48.77924,36.69417],[48.78061,36.69748],[48.78318,36.69724],[48.7853,36.70237],[48.78475,36.70745],[48.78654,36.71176],[48.78686,36.71897],[48.77355,36.82301],[48.8009,36.8851],[48.79989,36.88845],[48.8009,36.89084],[48.76184,37.02517],[48.77316,37.03041],[48.78833,36.99838],[48.81027,37.01263],[48.81023,37.01577],[48.81243,37.01752],[48.81181,37.05915],[48.84144,37.08398],[48.8403,37.08696],[48.84224,37.0886],[48.82217,37.13412],[48.8277,37.16857],[48.83053,37.17632],[48.83454,37.18111],[48.8613,37.1807],[48.89755,37.22089],[48.90802,37.258],[48.92519,37.31028],[48.97983,37.29181],[49.01243,37.34367],[49.05249,37.37375],[49.14761,37.60338],[49.1531,37.60736],[49.15567,37.60538],[49.15713,37.60643],[49.17376,37.59139],[49.18396,37.50485],[49.18593,37.50676],[49.1864,37.50345],[49.2272,37.54694],[49.2283,37.6431],[49.20885,37.77177],[49.20732,37.78574],[49.20676,37.81885],[49.20918,37.82246],[49.20945,37.82769],[49.21321,37.8333],[49.22749,37.84496],[49.23242,37.85232],[49.23958,37.86788],[49.25833,37.89822],[49.26855,37.91125],[49.28043,37.91914],[49.29092,37.92908],[49.29225,37.92699],[49.29444,37.92844],[49.30695,37.90872],[49.32053,37.88242],[49.38327,37.88705],[49.4227,37.86066],[49.4425,37.87585],[49.45465,37.91046],[49.49588,37.92566],[49.52011,37.96323],[49.55227,37.95421],[49.56589,37.9627],[49.59872,37.94628],[49.65649,38.00034],[49.71783,37.996],[49.71501,37.95022],[49.72197,37.94424],[49.72944,37.9424],[49.74859,37.96184],[49.7505,38.00411],[49.78479,38.04514],[49.78653,38.04236],[49.78919,38.04308],[49.79839,38.02846],[49.81216,38.00159],[49.82648,38.00528],[49.84683,38.07991],[49.84849,38.07722],[49.84903,38.07898],[49.86935,38.04349],[49.90125,38.02699]]
 ];
 
@@ -451,11 +450,14 @@ L.polyline(CLAIMED_BORDER, {
 // which accept a CanvasPattern just as well as a string. A separate SVG-pattern renderer
 // would mean a separate canvas and bring the cross-polygon blending problem back
 // (CONVENTIONS §10), so this stays on-canvas instead.
-// Brighter variant per faction — highlights a feature changed within the last 24h (see
-// isRecentChange() and the style callbacks in loadRegions/loadZones below). Deliberately
-// lighter/more saturated than the base faction colour, not darker: a recent change should
-// pop off the map, not read as a muddy grey smudge next to everything else.
-var RECENT_COLORS = { ukraine: '#60a5fa', russia: '#f87171' };
+// Recent-change variant per faction — highlights a feature changed within the last 24h (see
+// isRecentChange() and the style callbacks in loadRegions/loadZones below). Not simply
+// "brighter than base" for every faction: Ukraine's recent tint is a lighter blue than its
+// base colour, but Russia's is deliberately a darker red than its (now lighter) base colour —
+// newly-taken areas read as a deeper red against the lighter red of ground already held,
+// rather than the other way around. Whichever direction, it must never read as a muddy grey
+// smudge next to everything else.
+var RECENT_COLORS = { ukraine: '#60a5fa', russia: '#ef4444' };
 
 // STRIPE_BAND is the shared band width (px, at pattern-tile scale) for every hatch —
 // contested (two-tone) and attack (one-tone-on-transparent) alike, so the two read as one
@@ -484,9 +486,14 @@ function stripePattern(key, strokeColor, bgColor) {
   _stripePatterns[key] = octx.createPattern(off, 'repeat');
   return _stripePatterns[key];
 }
+// Pulls from FACTIONS/RECENT_COLORS rather than its own hex literals so the contested
+// pattern's red/blue bands can never drift out of sync with the flat faction colours used
+// everywhere else — they did, once, when RECENT_COLORS.russia stopped being "brighter than
+// base" for Russia specifically (see the comment above RECENT_COLORS).
 function contestedPattern(recent) {
-  return recent ? stripePattern('contested_r', '#60a5fa', '#f87171')   // bright blue bands over bright red
-                : stripePattern('contested_n', '#3b82f6', '#ef4444');  // blue bands over red
+  return recent
+    ? stripePattern('contested_r', RECENT_COLORS.ukraine, RECENT_COLORS.russia)
+    : stripePattern('contested_n', FACTIONS.ukraine.color, FACTIONS.russia.color);
 }
 function attackPattern(faction_id, recent) {
   var f = FACTIONS[faction_id] || { color: '#555555' };
@@ -621,22 +628,35 @@ var selectedDate = null;   // non-null while viewing a past date instead of the 
 // pane and renderer are constructor-time options — Leaflet applies them via geometryToLayer,
 // not via setStyle. Returning them from the style function alone silently drops both and
 // every fill lands in the default overlay pane at full opacity.
-function paintStyle(p, highlightIds) {
-  var recent = highlightIds ? highlightIds.has(p.id) : isRecentChange(p.last_updated);
+// Regions are wholesale territory, often a huge oblast-sized shape — flagging the whole
+// thing "recent" for every geometry nudge (meld, cut, redraw, repair) reads as if the whole
+// oblast just changed hands when really a sliver got trimmed off one corner. Only a genuine
+// oblast-tool faction reassignment (or brand-new oblast-tool add) is newsworthy enough to
+// light up the whole shape, so this keys off faction_set_at — stamped ONLY by oblastClick()
+// in editor.html, never by geometry-only edits — not last_updated, which every touch-up
+// bumps. Zones stay keyed off last_updated as before: a settlement-sized area lighting up
+// for any edit (including an addition to it) is proportionate.
+function isRecentRegion(p) {
+  return p.zone_type === 'oblast' && isRecentChange(p.faction_set_at);
+}
+function paintStyle(p, highlightIds, isRegion) {
+  var recent = highlightIds
+    ? highlightIds.has(p.id)
+    : isRegion ? isRecentRegion(p) : isRecentChange(p.last_updated);
   return factionStyle(p.faction, p.pattern, recent);
 }
 function renderRegionsLayer(data, highlightIds) {
   if (regionLayer) map.removeLayer(regionLayer);
   regionLayer = L.geoJSON(closeGaps(data), {
     pane: 'fills', renderer: fillsR,
-    style: function (f) { return paintStyle(f.properties || {}, highlightIds); },
+    style: function (f) { return paintStyle(f.properties || {}, highlightIds, true); },
   }).addTo(map);
 }
 function renderZonesLayer(data, highlightIds) {
   if (zoneLayer) map.removeLayer(zoneLayer);
   zoneLayer = L.geoJSON(closeGaps(data), {
     pane: 'fills', renderer: fillsR,
-    style: function (f) { return paintStyle(f.properties || {}, highlightIds); },
+    style: function (f) { return paintStyle(f.properties || {}, highlightIds, false); },
   }).addTo(map);
 }
 
@@ -803,7 +823,7 @@ function renderEventsScroller() {
 function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
 // Reconstructs state as of the end of targetDate (YYYY-MM-DD) from the live raw fetch plus
-// every history entry dated after it. Returns { zones, regions, changedIds }.
+// every history entry dated after it. Returns { zones, regions, changedZoneIds, changedRegionIds }.
 function reconstructStateAsOf(targetDate) {
   var working = new Map();   // id -> { kind, feature }
   (rawZonesFC.features || []).forEach(function (f) {
@@ -849,10 +869,25 @@ function reconstructStateAsOf(targetDate) {
 
   var zones = [], regions = [];
   working.forEach(function (v) { (v.kind === 'zone' ? zones : regions).push(v.f); });
+
+  // Same rule as isRecentRegion() for the live view: a region only belongs in the
+  // "changed" set if the change was a genuine oblast-tool faction event (add or
+  // reassignment), not a geometry-only touch-up — otherwise browsing history would light
+  // up a whole oblast for every meld/cut/redraw that happened to land on target date + 1.
+  var changedZoneIds = new Set(), changedRegionIds = new Set();
+  earliest.forEach(function (c, id) {
+    if (c.kind === 'zone') { changedZoneIds.add(id); return; }
+    var cur = working.get(id);
+    var isOblast = cur && cur.f && cur.f.properties && cur.f.properties.zone_type === 'oblast';
+    var isFactionEvent = c.action === 'add' || (c.fields || []).indexOf('faction') !== -1;
+    if (isOblast && isFactionEvent) changedRegionIds.add(id);
+  });
+
   return {
     zones: { type: 'FeatureCollection', features: zones },
     regions: { type: 'FeatureCollection', features: regions },
-    changedIds: new Set(earliest.keys()),
+    changedZoneIds: changedZoneIds,
+    changedRegionIds: changedRegionIds,
   };
 }
 
@@ -860,8 +895,8 @@ function showHistoricalDate(targetDate) {
   if (!lastHistory) return;
   selectedDate = targetDate;
   var result = reconstructStateAsOf(targetDate);
-  renderRegionsLayer(result.regions, result.changedIds);
-  renderZonesLayer(result.zones, result.changedIds);
+  renderRegionsLayer(result.regions, result.changedRegionIds);
+  renderZonesLayer(result.zones, result.changedZoneIds);
   restack();
   document.getElementById('history-live').classList.remove('active');
   document.getElementById('history-live').disabled = false;
