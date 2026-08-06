@@ -28,5 +28,9 @@ jobs:
           path: '.'
       - id: deployment
         uses: actions/deploy-pages@v4
-
-# retrigger
+        with:
+          # Default is 600000 (10 min). Deployments on this repo have been taking close to
+          # that just to leave "queued" — several genuine attempts got killed by the default
+          # right as they were about to land. Doubling it trades a slower worst-case failure
+          # for actually giving slow-but-working deployments room to finish.
+          timeout: 1200000
