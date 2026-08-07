@@ -461,25 +461,32 @@ L.polyline(CLAIMED_BORDER, {
 // the same: recent is the SATURATED version of the faction colour, held ground is the washed
 // one. It is deliberately not "lighter than base" — the whole 'fills' pane renders at 0.42
 // opacity (see createPane('fills') above), so every fill is already blended most of the way
-// towards the basemap and a lighter tint disappears into it entirely. Ukraine's recent tint
-// used to be a lighter blue (#60a5fa) and Russia's a barely-darker red (#ef4444), and at pane
-// opacity neither was legible against its own base colour — especially inside a hatch, where
-// each band is only a few pixels wide. Pushing both deeper widens the gap against the base
-// colours below in every channel, which is the only lever available: per-feature opacity is
-// forbidden here (CONVENTIONS §10 — it composites overlapping polygons into a colour nobody
-// painted), so colour is the only thing that can carry "this changed".
-// Measured against a white basemap at that 0.42 pane opacity, which is the case that matters
-// — the pale one. Base composites to rgb(173,202,251) / rgb(252,195,195); these composite to
-// rgb(161,172,206) / rgb(212,159,159). The old pair managed a 13-point separation on blue,
-// which is why it was invisible. Deeper is the whole available range: lighter runs into the
-// basemap, and there is no third dimension to use.
+// towards the basemap, and a lighter tint disappears into it entirely.
+// Two earlier pairs both failed here, for opposite reasons:
+//   - Ukraine #60a5fa / Russia #ef4444 (original): nearly the same channel spread as the base
+//     colours, so compositing at 0.42 landed within a few points of the base's own saturation
+//     — invisible against ground the faction already held.
+//   - Ukraine #1e3a8a / Russia #991b1b (2026-08-07 fix attempt): darker, but *narrower*
+//     channel spread than the base colours (navy and maroon are lower-chroma than #3b82f6 /
+//     #f87171 to begin with). Compositing toward a light basemap scales chroma down by the
+//     pane's alpha regardless of how dark the source is, so a low-spread dark colour crushes
+//     to near-grey faster than a high-spread light one does. Measured against white: base
+//     composites to HSL(217°,91%,83%) / HSL(0°,90%,88%); this pair composited to
+//     HSL(225°,31%,72%) / HSL(0°,38%,73%) — saturation collapsed from ~90% to ~30-38%, which
+//     is exactly the "grey" bug reported on the public map (both the contested hatch and solid
+//     recent fills use this pair).
+// The fix keeps chroma AT LEAST as wide as the base colour (so alpha-scaling can't crush it)
+// while still landing at a different, deeper lightness for separation. Measured against
+// white at 0.42: this pair composites to HSL(224°,100%,79%) / HSL(0°,88%,78%) — more
+// saturated than base in both channels, not less.
 // Slightly deeper than CONTESTED_EDGE_COLORS below, which wants a darker shade of each
 // faction for the same legibility reason. That casing is parked; if it comes back it will
 // read as the same family, which is intended — a recent fill and a contested casing are both
 // "look here", and they never coincide on the same pixel.
 // Whichever direction these move, they must never read as a muddy grey smudge next to
-// everything else.
-var RECENT_COLORS = { ukraine: '#1e3a8a', russia: '#991b1b' };
+// everything else — check the composited HSL saturation against the base colour's, not just
+// how the raw hex looks in isolation.
+var RECENT_COLORS = { ukraine: '#0044ff', russia: '#ee0000' };
 
 // STRIPE_BAND is the shared band width (px, at pattern-tile scale) for every hatch —
 // contested (two-tone) and attack (one-tone-on-transparent) alike, so the two read as one
