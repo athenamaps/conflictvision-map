@@ -40,7 +40,13 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   box-shadow: 0 6px 24px rgba(0,0,0,.6); overflow: hidden;
 }
 #stats-widget .stats-head { padding: 8px 12px; cursor: pointer; font-weight: 600; color: #eee; white-space: nowrap; }
-#stats-widget .stats-list { max-height: 260px; overflow-y: auto; padding: 4px 12px 8px; }
+/* Tall enough that the list does not need a scrollbar. A row measures ~42px, and
+   territory_stats.json currently carries 9 oblasts (~378px), so 420px leaves room for a
+   tenth rather than sitting exactly on the current count — computeTerritoryStats() only
+   emits oblasts with some non-Ukrainian presence, so the row count grows with the front.
+   The viewport-relative cap is a fallback, not the target: it only bites on a short window,
+   and on one the panel has to give somewhere. */
+#stats-widget .stats-list { max-height: min(420px, calc(100vh - 240px)); overflow-y: auto; padding: 4px 12px 8px; }
 #stats-widget .stats-row { padding: 4px 0; border-bottom: 1px solid #2a2a2a; }
 #stats-widget .stats-row:last-child { border-bottom: none; }
 #stats-widget .stats-row-top { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: #bbb; }
@@ -102,6 +108,16 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   padding: 8px 14px; background: #1a1a1a; border-top: 1px solid #2a2a2a; flex-shrink: 0;
 }
 #history-panel.hidden { display: none; }
+/* Collapsed is the default state (historyCollapsed below) — the bar costs the map a strip of
+   height every viewer pays for whether or not they came for the history, so it starts as
+   just its own title and opens on a click. */
+#history-panel.collapsed #events-scroller,
+#history-panel.collapsed #history-controls { display: none; }
+#history-toggle {
+  background: none; border: none; color: #bbb; font: 600 12px 'Segoe UI', sans-serif;
+  cursor: pointer; padding: 4px 6px; white-space: nowrap; flex-shrink: 0;
+}
+#history-toggle:hover { color: #fff; }
 #events-scroller {
   flex: 1; min-width: 0; display: flex; gap: 8px; overflow-x: auto; padding: 2px 0;
 }
@@ -117,6 +133,12 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
    every counter shown is a gain for somebody. Contested and attack-hatch cards carry no
    counter at all and simply omit this element (see eventGainLabel()). */
 .event-card .ec-delta { font-size: 11px; font-weight: 600; }
+/* The citation behind the change — a link the operator masked behind a label, or plain text.
+   Kept to one line: the card is a scroller item, not a place to read a paragraph. */
+.event-card .ec-source { font-size: 10.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-card .ec-source a { color: #7aa2d8; text-decoration: none; }
+.event-card .ec-source a:hover { color: #a8c6ee; text-decoration: underline; }
+.event-card .ec-source .plain { color: #8a8a8a; }
 #history-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 #history-date {
   background: #242424; color: #eee; border: 1px solid #383838; border-radius: 6px;
@@ -146,7 +168,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   <div id="stats-widget"></div>
 </div>
 
-<div id="history-panel" class="hidden">
+<div id="history-panel" class="hidden collapsed">
+  <button id="history-toggle">Timeline ▸</button>
   <div id="events-scroller"></div>
   <div id="history-controls">
     <input type="date" id="history-date" title="Select a date to revert the frontline to how it looked at the end of that day"/>
@@ -207,6 +230,8 @@ var STRINGS = {
     statsHeader: 'Percent of controlled territories',
     ruPct: function (p) { return p + '% RU'; },
     rowAreas: function (ru, ua) { return 'Russia: ' + ru + ' km² · Ukraine: ' + ua + ' km²'; },
+    timelineHeader: 'Timeline',
+    timelineToggleTitle: 'Show or hide the timeline of recent changes',
     historyDateTitle: 'Select a date to revert the frontline to how it looked at the end of that day',
     live: '● Live',
     liveTitle: 'Return to the live, current frontline',
@@ -239,6 +264,8 @@ var STRINGS = {
     statsHeader: 'Процент контролируемых территорий',
     ruPct: function (p) { return p + '% РФ'; },
     rowAreas: function (ru, ua) { return 'Россия: ' + ru + ' км² · Украина: ' + ua + ' км²'; },
+    timelineHeader: 'События',
+    timelineToggleTitle: 'Показать или скрыть ленту последних изменений',
     historyDateTitle: 'Выберите дату, чтобы вернуть линию фронта к состоянию на конец этого дня',
     live: '● Сейчас',
     liveTitle: 'Вернуться к текущей линии фронта',
@@ -1152,6 +1179,62 @@ function eventGainLabel(rep, delta) {
   return { side: side, text: t('gainLabel')(t('factionNames')[side] || side, v.toFixed(1)) };
 }
 
+// ── The panel's own collapse state ──────────────────────────────────────────────
+// Starts collapsed: the bar takes a strip of map height from every viewer, and most arrive
+// for the current front rather than the log of how it got there. Not persisted, matching the
+// stats widget's statsMinimized — one session's choice, not a stored preference.
+var historyCollapsed = true;
+function renderHistoryToggle() {
+  var btn = document.getElementById('history-toggle');
+  btn.textContent = t('timelineHeader') + ' ' + (historyCollapsed ? '▸' : '▾');
+  btn.title = t('timelineToggleTitle');
+}
+document.getElementById('history-toggle').addEventListener('click', function () {
+  historyCollapsed = !historyCollapsed;
+  document.getElementById('history-panel').classList.toggle('collapsed', historyCollapsed);
+  renderHistoryToggle();
+  // The scroller cannot measure its own scrollWidth while display:none, so the "newest card
+  // in view" scroll that renderEventsScroller() does is a no-op on a collapsed panel. Redo
+  // it on the way open, or the first thing an expanding viewer sees is the oldest card.
+  if (!historyCollapsed) {
+    var box = document.getElementById('events-scroller');
+    box.scrollLeft = box.scrollWidth;
+  }
+});
+
+// ── The citation behind a change ────────────────────────────────────────────────
+// Written in editor.html as `info_source` on the region and snapshotted onto the change
+// record; see that file's INFORMATION SOURCE section for the shape and why it is not the
+// long-standing `source` field. Two forms render today — a masked link (label + href) and
+// plain text. A third, an unmasked link, needs nothing here: it arrives as a url whose label
+// is the url, which is already the masked-link branch.
+function safeHttpUrl(u) {
+  var s = (u || '').trim();
+  return /^https?:\/\//i.test(s) ? s : null;   // never emit an href for any other scheme
+}
+function sourceHtml(src) {
+  if (!src) return '';
+  var label = (src.label || '').trim();
+  var url = safeHttpUrl(src.url);
+  if (url) {
+    // noopener/noreferrer because the href is operator-supplied and points off-site, and
+    // target=_blank without it hands the opened page a handle back to this one.
+    return '<div class="ec-source"><a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">'
+         + esc(label || url) + '</a></div>';
+  }
+  return label ? '<div class="ec-source"><span class="plain">' + esc(label) + '</span></div>' : '';
+}
+
+// A card is a group of per-feature records, so the citation comes off the representative and
+// falls back to any member carrying one — a redraw logged as three polygons only ever has
+// the source typed onto it once.
+function eventSourceOf(group) {
+  var rep = eventRepresentative(group);
+  if (rep.info_source) return rep.info_source;
+  for (var i = group.length - 1; i >= 0; i--) if (group[i].info_source) return group[i].info_source;
+  return null;
+}
+
 function groupBounds(group) {
   var b = null;
   group.forEach(function (c) {
@@ -1184,8 +1267,12 @@ function renderEventsScroller() {
       + (gain
           ? '<div class="ec-delta" style="color:' + ((FACTIONS[gain.side] || {}).color || '#888')
             + '">' + esc(gain.text) + '</div>'
-          : '');
-    el.addEventListener('click', function () {
+          : '')
+      + sourceHtml(eventSourceOf(item.group));
+    el.addEventListener('click', function (ev) {
+      // The whole card zooms the map, but the source link inside it has to open the source —
+      // without this the click bubbles and does both at once.
+      if (ev.target.closest && ev.target.closest('.ec-source a')) return;
       var b = groupBounds(item.group);
       if (b && b.isValid()) map.fitBounds(b, { maxZoom: 12 });
     });
@@ -1395,6 +1482,7 @@ function renderStaticChrome() {
   var liveBtn = document.getElementById('history-live');
   liveBtn.textContent = t('live');
   liveBtn.title = t('liveTitle');
+  renderHistoryToggle();
 }
 function setLanguage(lang) {
   currentLang = lang;
