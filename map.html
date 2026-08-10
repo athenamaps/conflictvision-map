@@ -675,7 +675,14 @@ var selectedDate = null;   // non-null while viewing a past date instead of the 
 // settlement zones now that CONVENTIONS §10 folded that schema in here, and hand-drawn
 // pockets) stays keyed off last_updated instead: an area that small lighting up for any
 // edit, including an addition to it, is proportionate the way a whole oblast is not.
+// exclude_from_timeline is the operator saying this feature's edits are not frontline events
+// (ARCHITECTURE.md §3.4), so it must not light up as a fresh change either. The saturated fill
+// and the events scroller are two renderings of one claim — "this just changed" — and a zone
+// shouting it in colour while absent from the log is the worst of both: a viewer sees
+// something new on the front and finds no card explaining it. Reported 2026-08-09 against
+// "North Donetsk contested" / "Slavyansk approach contested", both flagged at creation.
 function isRecentRegion(p) {
+  if (p.exclude_from_timeline) return false;
   return p.zone_type === 'oblast' ? isRecentChange(p.faction_set_at) : isRecentChange(p.last_updated);
 }
 function paintStyle(p, highlightIds) {
