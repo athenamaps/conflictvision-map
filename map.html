@@ -136,8 +136,12 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 /* The citation behind the change — a link the operator masked behind a label, or plain text.
    Kept to one line: the card is a scroller item, not a place to read a paragraph. */
 .event-card .ec-source { font-size: 10.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.event-card .ec-source a { color: #7aa2d8; text-decoration: none; }
-.event-card .ec-source a:hover { color: #a8c6ee; text-decoration: underline; }
+/* White, never blue. On this bar blue is not "link", it is Ukraine: .ec-delta paints the
+   gaining side's faction colour one line above, so a blue citation under a contested-pocket
+   card read as a Ukrainian gain on a card that deliberately credits nobody. The link is
+   identified by hover (underline) and by the cursor, not by colour. */
+.event-card .ec-source a { color: #fff; text-decoration: none; }
+.event-card .ec-source a:hover { color: #fff; text-decoration: underline; }
 .event-card .ec-source .plain { color: #8a8a8a; }
 #history-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 #history-date {
