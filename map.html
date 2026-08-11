@@ -251,7 +251,7 @@ var STRINGS = {
     gainLabel: function (side, v) { return side + ' +' + v + ' km²'; },
     unnamed: 'Unnamed',
     basemapMaps: 'Maps', basemapSatellite: 'Satellite', basemapTerrain: 'Terrain',
-    layerOsm: 'OSM', layerYandexMap: 'Yandex (RU)', layerGoogleRoads: 'Google Roads',
+    layerYandexMap: 'Yandex (RU)', layerGoogleRoads: 'Google Roads',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Yandex Hybrid', layerGoogleHybrid: 'Google Hybrid',
     layerOpenTopo: 'OpenTopoMap',
   },
@@ -281,7 +281,7 @@ var STRINGS = {
     gainLabel: function (side, v) { return side + ' +' + v + ' км²'; },
     unnamed: 'Без названия',
     basemapMaps: 'Карты', basemapSatellite: 'Спутник', basemapTerrain: 'Рельеф',
-    layerOsm: 'OSM', layerYandexMap: 'Яндекс (рус)', layerGoogleRoads: 'Google Дороги',
+    layerYandexMap: 'Яндекс (рус)', layerGoogleRoads: 'Google Дороги',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Яндекс Гибрид', layerGoogleHybrid: 'Google Гибрид',
     layerOpenTopo: 'OpenTopoMap',
   },
@@ -358,18 +358,19 @@ var CLAIMED_BORDER = [
 // strength for the ones that aren't. Declared here rather than with the rest of the scrim
 // (see "Recent-change highlight scrim" below, which has the measurements and the trade-off)
 // only because the layers below need the value before that block runs.
-var HIGHLIGHT_SCRIM_COLOR = '#f2efe9';    // OSM Carto's land colour — the backdrop the street
-                                          // layers already composite the highlight over
+var HIGHLIGHT_SCRIM_COLOR = '#f2efe9';    // the light neutral the street layers already
+                                          // composite the highlight over. Taken from OSM
+                                          // Carto's land colour, which was the reference
+                                          // street basemap when the scrim was measured;
+                                          // that layer is retired (2026-08-11) but Google
+                                          // Roads and Yandex are light styles in the same
+                                          // range, so the value still describes them
 var HIGHLIGHT_SCRIM_STRENGTH = 0.45;      // satellite layers only. Higher = the highlight reads
                                           // more like it does on the street maps; lower = more
                                           // imagery survives inside it. 1.0 hides the imagery.
                                           // Was 0.65; taken down 30% on 2026-08-11 after looking
                                           // at it over Yandex Hybrid — the scrim was reading as
                                           // milky over the imagery it was meant to leave visible
-var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> — settlement boundaries also derived from OSM (ODbL)',
-  maxZoom: 18, crsKey: '3857', highlightScrim: 0,
-});
 var yandexRu = L.tileLayer(
   'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
   { attribution: '&copy; Яндекс', maxZoom: 18, crsKey: '3395', highlightScrim: 0 }
@@ -380,7 +381,7 @@ var googleRoads = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z=
 });
 var satellite = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { attribution: 'Tiles &copy; Esri — boundaries derived from OpenStreetMap (ODbL)', maxZoom: 18, crsKey: '3857',
+  { attribution: 'Tiles &copy; Esri', maxZoom: 18, crsKey: '3857',
     highlightScrim: HIGHLIGHT_SCRIM_STRENGTH }
 );
 var yandexHybrid = L.tileLayer(
@@ -397,13 +398,39 @@ var openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   maxZoom: 17, subdomains: ['a','b','c'], crsKey: '3857', highlightScrim: 0,
 });
 
-var map = L.map('map', { layers: [osm] }).setView([48.5, 33.5], 7);
+// The basemap the map opens on follows the language the reader arrives with — Google Roads
+// for English, Yandex for Russian — on the theory that a reader of either language is best
+// served by the street map that labels places in it. `currentLang` is already resolved from
+// localStorage above, so a returning reader gets the layer matching the language they last
+// chose.
+//
+// It is a DEFAULT, read once at load, and nothing re-derives it afterwards. In particular the
+// RU/EN button must never switch basemaps: by the time it is pressed the reader may well have
+// picked a layer deliberately, and swapping tiles under them to follow a UI-language toggle
+// throws that away. See setLanguage() at the bottom of this file, which rebuilds the switcher's
+// labels and pointedly leaves activeBasemap alone.
+function defaultBasemapForLang(lang) { return lang === 'ru' ? yandexRu : googleRoads; }
+var initialBasemap = defaultBasemapForLang(currentLang);
+var map = L.map('map', {
+  layers: [initialBasemap],
+  // Yandex is elliptical Mercator; getting this wrong at construction shifts every tile
+  // against the vectors until the first basemap switch happens to fix it.
+  crs: initialBasemap.options.crsKey === '3395' ? L.CRS.EPSG3395 : L.CRS.EPSG3857,
+}).setView([48.5, 33.5], 7);
 map.attributionControl.setPrefix(false); // drop the "Leaflet" branding link/flag, keep tile attributions
+// The territory this map draws is derived from OSM (settlement and oblast boundaries), which
+// ODbL requires be credited whatever basemap is showing. It used to ride along on the OSM and
+// Esri tile layers' own attribution strings; with the OSM layer retired and Google/Yandex
+// carrying no such line, it is a permanent entry instead — owned by the data, not by whichever
+// tiles happen to be selected.
+map.attributionControl.addAttribution(
+  'Boundaries derived from <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)'
+);
 L.control.scale({ position: 'bottomleft', imperial: false }).addTo(map);
 
 // Hand-rolled grouped basemap switcher — Leaflet's built-in L.control.layers has no concept
 // of groups. One radio group across all three sections; only ever one tile layer active.
-var activeBasemap = osm;
+var activeBasemap = initialBasemap;
 function selectBasemap(layer) {
   if (layer === activeBasemap) return;
   map.removeLayer(activeBasemap);
@@ -449,7 +476,6 @@ function buildBasemapControl(groups) {
 function basemapGroups() {
   return [
     { title: t('basemapMaps'), items: [
-      { label: t('layerOsm'),         layer: osm },
       { label: t('layerYandexMap'),   layer: yandexRu },
       { label: t('layerGoogleRoads'), layer: googleRoads },
     ] },
@@ -1611,6 +1637,10 @@ function setLanguage(lang) {
   report();
   renderStats();
   renderEventsScroller();
+  // Labels only. The basemap deliberately does not follow the language once the page is up —
+  // language picks the opening layer (defaultBasemapForLang(), above) and nothing more, so a
+  // reader who chose a layer keeps it. buildBasemapControl() reads activeBasemap fresh, which
+  // is what preserves the selection across this rebuild.
   rebuildBasemapControl();
   updateMeasureReadout();
   if (selectedDate) {
