@@ -353,31 +353,48 @@ var CLAIMED_BORDER = [
 // Basemaps grouped into Карты (map) / Спутник (satellite) / Рельеф (topomap) — mirrors
 // editor.html's basemap switcher. Yandex tiles use elliptical Mercator (EPSG:3395);
 // everything else is ordinary spherical Web Mercator (EPSG:3857) — see selectBasemap().
+// `highlightScrim` is each layer's answer to "how dark are your tiles?" — 0 for anything
+// light enough to composite the recent-change highlight correctly on its own, the scrim
+// strength for the ones that aren't. Declared here rather than with the rest of the scrim
+// (see "Recent-change highlight scrim" below, which has the measurements and the trade-off)
+// only because the layers below need the value before that block runs.
+var HIGHLIGHT_SCRIM_COLOR = '#f2efe9';    // OSM Carto's land colour — the backdrop the street
+                                          // layers already composite the highlight over
+var HIGHLIGHT_SCRIM_STRENGTH = 0.45;      // satellite layers only. Higher = the highlight reads
+                                          // more like it does on the street maps; lower = more
+                                          // imagery survives inside it. 1.0 hides the imagery.
+                                          // Was 0.65; taken down 30% on 2026-08-11 after looking
+                                          // at it over Yandex Hybrid — the scrim was reading as
+                                          // milky over the imagery it was meant to leave visible
 var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> — settlement boundaries also derived from OSM (ODbL)',
-  maxZoom: 18, crsKey: '3857',
+  maxZoom: 18, crsKey: '3857', highlightScrim: 0,
 });
 var yandexRu = L.tileLayer(
   'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
-  { attribution: '&copy; Яндекс', maxZoom: 18, crsKey: '3395' }
+  { attribution: '&copy; Яндекс', maxZoom: 18, crsKey: '3395', highlightScrim: 0 }
 );
 var googleRoads = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
   attribution: '&copy; Google', maxZoom: 20, subdomains: ['0','1','2','3'], crsKey: '3857',
+  highlightScrim: 0,
 });
 var satellite = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { attribution: 'Tiles &copy; Esri — boundaries derived from OpenStreetMap (ODbL)', maxZoom: 18, crsKey: '3857' }
+  { attribution: 'Tiles &copy; Esri — boundaries derived from OpenStreetMap (ODbL)', maxZoom: 18, crsKey: '3857',
+    highlightScrim: HIGHLIGHT_SCRIM_STRENGTH }
 );
 var yandexHybrid = L.tileLayer(
   'https://core-sat.maps.yandex.net/tiles?l=sat,skl&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
-  { attribution: '&copy; Яндекс', maxZoom: 18, crsKey: '3395' }
+  { attribution: '&copy; Яндекс', maxZoom: 18, crsKey: '3395', highlightScrim: HIGHLIGHT_SCRIM_STRENGTH }
 );
 var googleHybrid = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
   attribution: '&copy; Google', maxZoom: 20, subdomains: ['0','1','2','3'], crsKey: '3857',
+  highlightScrim: HIGHLIGHT_SCRIM_STRENGTH,
 });
+// OpenTopoMap is a light style — hillshading darkens it a little, nowhere near imagery.
 var openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
-  maxZoom: 17, subdomains: ['a','b','c'], crsKey: '3857',
+  maxZoom: 17, subdomains: ['a','b','c'], crsKey: '3857', highlightScrim: 0,
 });
 
 var map = L.map('map', { layers: [osm] }).setView([48.5, 33.5], 7);
@@ -392,6 +409,7 @@ function selectBasemap(layer) {
   map.removeLayer(activeBasemap);
   activeBasemap = layer;
   layer.addTo(map);
+  applyHighlightScrim(layer);   // the recent-change highlight is basemap-compensated — see below
   var want = layer.options.crsKey === '3395' ? L.CRS.EPSG3395 : L.CRS.EPSG3857;
   if (map.options.crs !== want) {
     var c = map.getCenter(), z = map.getZoom();
@@ -464,7 +482,71 @@ map.getPane('fills').style.zIndex = 400;
 map.getPane('fills').style.opacity = '0.42';
 var fillsR = L.canvas({ pane: 'fills', padding: 0.3 });
 
+// ── Recent-change highlight scrim ─────────────────────────────────────────────
+// The 'fills' pane is translucent, so what a fill LOOKS like is its colour composited over
+// whatever the basemap happens to be under it. For ordinary held ground that is the point.
+// For the recent-change highlight it is a bug reported 2026-08-11: the same #ee0000 reads as
+// a pale rose over a light street map and as a deep, blazing red over satellite imagery, so
+// the one signal that says "this just changed" changes strength with the reader's basemap.
+//
+// Measured, because the fix has to be aimed at the right quantity. Sampling real Esri tiles
+// over the front line gives a mean imagery colour of rgb(63,81,53); OSM's land is
+// rgb(242,239,233). Composited at the pane's 0.42 the recent red lands on Lab L*68.6 C*42.4
+// over the street map and L*32.8 C*48.2 over imagery. The chroma is nearly identical — what
+// differs is lightness, and relative colourfulness C*/L* goes 0.62 → 1.47. That ratio is the
+// "brighter": the same ink on a dark, desaturated backdrop shouts.
+//
+// So the lever is the backdrop's lightness, and nothing else works. Two alternatives were
+// measured and rejected: dropping the pane's opacity on satellite reaches street-level
+// loudness only at ~0.15, where the recent fill separates from its own base colour by C*3.5
+// against the street map's 19.4 — i.e. the highlight is gone, the exact 2026-08-07 bug; and
+// per-basemap recent colours cannot do it either, since over a dark backdrop every low-chroma
+// candidate collapses onto the base fill.
+//
+// What ships is a scrim: highlighted features (and only those) get the same shapes painted in
+// a light neutral in their own pane under 'fills', at a per-basemap strength. It lightens the
+// backdrop under the highlight instead of replacing it, so the map is still there underneath.
+// The street and terrain layers set 0 — they are already light, and nothing about them
+// changes. The satellite layers set HIGHLIGHT_SCRIM_STRENGTH: at 0.45 the recent fill lands
+// near C*/L* 0.90 against the street map's 0.62 (from 1.47), and ~32% of the imagery's own
+// contrast survives inside the highlight.
+//
+// That 32% is the honest cost and the knob to turn. Exact equality across basemaps needs
+// strength 1.0, which hides the imagery completely — transparency means the backdrop is in
+// the result by definition, so "identical on every layer" and "the map shows through" cannot
+// both be had. This trades most of the difference away for a still-visible basemap; raise the
+// constant for a more uniform highlight, lower it for more imagery.
+//
+// The scrim is a second fill canvas, which CONVENTIONS §10 otherwise rules out. The reason
+// that rule exists — overlapping translucent fills producing a colour nobody painted — cannot
+// bite here, on one condition that must hold: the canvas carries exactly one flat colour,
+// drawn opaque, with the translucency applied to the PANE, exactly as 'fills' does. Two
+// overlapping scrims then give that same colour back. Per-feature alpha here, or a second
+// colour in this pane, and the §10 problem is real again.
+// HIGHLIGHT_SCRIM_COLOR / HIGHLIGHT_SCRIM_STRENGTH are declared with the basemaps above —
+// each layer's options carry its own strength, so they have to exist before those are built.
+map.createPane('highlightScrim');
+map.getPane('highlightScrim').style.zIndex = 399;   // above tiles (200), below 'fills' (400)
+map.getPane('highlightScrim').style.pointerEvents = 'none';
+var highlightScrimR = L.canvas({ pane: 'highlightScrim', padding: 0.3 });
+function highlightScrimStyle() {
+  return {
+    pane: 'highlightScrim', renderer: highlightScrimR,
+    color: HIGHLIGHT_SCRIM_COLOR, fillColor: HIGHLIGHT_SCRIM_COLOR,
+    fillOpacity: 1, weight: 1, opacity: 1, lineJoin: 'round',
+  };
+}
+// Each basemap declares its own strength through `highlightScrim` in its tileLayer options
+// (above), so adding a basemap means answering "is this one dark?" where the layer is defined,
+// not maintaining a list of dark layers somewhere else.
+function applyHighlightScrim(layer) {
+  var s = (layer && layer.options && layer.options.highlightScrim) || 0;
+  map.getPane('highlightScrim').style.opacity = String(s);
+}
+applyHighlightScrim(activeBasemap);   // whatever the map opened on — selectBasemap only runs on a switch
+
 var regionLayer = null;   // control_regions.geojson — the only territory file now (CONVENTIONS §10)
+var highlightScrimLayer = null;   // scrim under the recent-change highlight, see above
 
 // Claimed-border overlay — a fixed reference line, not territory data, so it sits above the
 // 'fills' pane (z-index 400) and is always visible regardless of basemap or fill opacity.
@@ -472,18 +554,20 @@ var regionLayer = null;   // control_regions.geojson — the only territory file
 // array), not closed rings, so this draws as L.polyline, not L.polygon.
 map.createPane('claimedBorder');
 map.getPane('claimedBorder').style.zIndex = 450;
-// A dark casing drawn first holds contrast on light and dark basemaps alike — a plain line
-// washed out badly over satellite imagery. Solid, semi-transparent, no dash — matches the
-// front-line style convention used elsewhere (thick translucent band, not a dashed outline).
-// Opacities are 30% lower than their original 0.35/0.65 — the line read as too heavy-handed
-// against the fills it sits above.
+// Styled to match the administrative boundary OSM Carto itself draws (the basemap's own
+// oblast lines, screenshot-matched 2026-08-11): #ac46ac at 2px. This line is a reference
+// boundary of exactly that kind, so it should read as one — the earlier 6px/4px crimson
+// band read as front-line weight, i.e. as territory data, which it is not.
+// The casing is kept but flipped from a dark crimson to white, matching the light halo
+// Carto puts under its own admin lines: it is what stops the 2px line washing out over
+// satellite imagery, and unlike a dark casing it does not darken the purple it surrounds.
 L.polyline(CLAIMED_BORDER, {
   pane: 'claimedBorder', interactive: false,
-  color: '#3a0a1f', weight: 6, opacity: 0.245, lineJoin: 'round', lineCap: 'round',
+  color: '#ffffff', weight: 4, opacity: 0.3, lineJoin: 'round', lineCap: 'round',
 }).addTo(map);
 L.polyline(CLAIMED_BORDER, {
   pane: 'claimedBorder', interactive: false,
-  color: '#c2255c', weight: 4, opacity: 0.455, lineJoin: 'round', lineCap: 'round',
+  color: '#ac46ac', weight: 2, opacity: 0.6, lineJoin: 'round', lineCap: 'round',
 }).addTo(map);
 
 // The 1px stroke is the fill colour, never a contrasting outline: it exists only to close
@@ -689,9 +773,14 @@ function isRecentRegion(p) {
   if (p.exclude_from_timeline) return false;
   return p.zone_type === 'oblast' ? isRecentChange(p.faction_set_at) : isRecentChange(p.last_updated);
 }
+// The one test for "is this feature lit up as a recent change" — the fill style and the scrim
+// under it (see HIGHLIGHT_SCRIM_COLOR above) must agree exactly, or a scrim shows through
+// under an unhighlighted fill as a pale patch of nothing.
+function isHighlighted(p, highlightIds) {
+  return highlightIds ? highlightIds.has(p.id) : isRecentRegion(p);
+}
 function paintStyle(p, highlightIds) {
-  var recent = highlightIds ? highlightIds.has(p.id) : isRecentRegion(p);
-  return factionStyle(p.faction, p.pattern, recent);
+  return factionStyle(p.faction, p.pattern, isHighlighted(p, highlightIds));
 }
 
 // ── Contested-zone edge borders ─────────────────────────────────────────────────────
@@ -954,7 +1043,20 @@ function buildContestedEdges(features) {
 
 function renderRegionsLayer(data, highlightIds) {
   if (regionLayer) map.removeLayer(regionLayer);
-  regionLayer = L.geoJSON(closeGaps(data), {
+  if (highlightScrimLayer) map.removeLayer(highlightScrimLayer);
+  // Both layers draw the same post-closeGaps geometry, so the scrim lines up with the fill over
+  // it to the pixel — buffering twice (or scrimming the raw shape) would leave a pale rim
+  // sticking out from under the highlight.
+  var closed = closeGaps(data);
+  highlightScrimLayer = L.geoJSON({
+    type: 'FeatureCollection',
+    features: (closed.features || []).filter(function (f) {
+      return isHighlighted(f.properties || {}, highlightIds);
+    }),
+  }, {
+    pane: 'highlightScrim', renderer: highlightScrimR, style: highlightScrimStyle,
+  }).addTo(map);
+  regionLayer = L.geoJSON(closed, {
     pane: 'fills', renderer: fillsR,
     style: function (f) { return paintStyle(f.properties || {}, highlightIds); },
   }).addTo(map);
