@@ -291,31 +291,36 @@ function t(key) { return STRINGS[currentLang][key]; }
 // Fixed, closed set of Ukraine's administrative regions — safe to hardcode rather than
 // plumb through the data pipeline. Keyed on the exact Ukrainian spelling territory_stats.json
 // already publishes (sourced from oblasts.geojson); unrecognised names fall back to it as-is.
+// The `en` column is the older, Russian-derived transliteration (Lugansk, Kharkov, Kiev),
+// matching the `ru` column beside it and the region names the operator writes by hand in
+// control_regions.geojson ("Ukraine-Kharkov", "Russia-Zaporozhye"). Deliberate — do not
+// "correct" it to the Ukrainian transliterations; oblasts.geojson's `name:en` was moved to
+// the same spellings in the same change (CONVENTIONS §10).
 var OBLAST_NAMES = {
-  'Вінницька область':          { en: 'Vinnytsia Oblast',      ru: 'Винницкая область' },
+  'Вінницька область':          { en: 'Vinnitsa Oblast',       ru: 'Винницкая область' },
   'Волинська область':          { en: 'Volyn Oblast',          ru: 'Волынская область' },
-  'Дніпропетровська область':   { en: 'Dnipropetrovsk Oblast', ru: 'Днепропетровская область' },
+  'Дніпропетровська область':   { en: 'Dnepropetrovsk Oblast', ru: 'Днепропетровская область' },
   'Донецька область':           { en: 'Donetsk Oblast',        ru: 'Донецкая область' },
-  'Житомирська область':        { en: 'Zhytomyr Oblast',       ru: 'Житомирская область' },
-  'Закарпатська область':       { en: 'Zakarpattia Oblast',    ru: 'Закарпатская область' },
-  'Запорізька область':         { en: 'Zaporizhzhia Oblast',   ru: 'Запорожская область' },
-  'Івано-Франківська область':  { en: 'Ivano-Frankivsk Oblast', ru: 'Ивано-Франковская область' },
-  'Київська область':           { en: 'Kyiv Oblast',           ru: 'Киевская область' },
-  'Кіровоградська область':     { en: 'Kirovohrad Oblast',     ru: 'Кировоградская область' },
-  'Луганська область':          { en: 'Luhansk Oblast',        ru: 'Луганская область' },
-  'Львівська область':          { en: 'Lviv Oblast',           ru: 'Львовская область' },
-  'Миколаївська область':       { en: 'Mykolaiv Oblast',       ru: 'Николаевская область' },
-  'Одеська область':            { en: 'Odesa Oblast',          ru: 'Одесская область' },
+  'Житомирська область':        { en: 'Zhitomir Oblast',       ru: 'Житомирская область' },
+  'Закарпатська область':       { en: 'Transcarpathia Oblast', ru: 'Закарпатская область' },
+  'Запорізька область':         { en: 'Zaporozhye Oblast',     ru: 'Запорожская область' },
+  'Івано-Франківська область':  { en: 'Ivano-Frankovsk Oblast', ru: 'Ивано-Франковская область' },
+  'Київська область':           { en: 'Kiev Oblast',           ru: 'Киевская область' },
+  'Кіровоградська область':     { en: 'Kirovograd Oblast',     ru: 'Кировоградская область' },
+  'Луганська область':          { en: 'Lugansk Oblast',        ru: 'Луганская область' },
+  'Львівська область':          { en: 'Lvov Oblast',           ru: 'Львовская область' },
+  'Миколаївська область':       { en: 'Nikolaev Oblast',       ru: 'Николаевская область' },
+  'Одеська область':            { en: 'Odessa Oblast',         ru: 'Одесская область' },
   'Полтавська область':         { en: 'Poltava Oblast',        ru: 'Полтавская область' },
-  'Рівненська область':         { en: 'Rivne Oblast',          ru: 'Ровненская область' },
+  'Рівненська область':         { en: 'Rovno Oblast',          ru: 'Ровненская область' },
   'Сумська область':            { en: 'Sumy Oblast',           ru: 'Сумская область' },
-  'Тернопільська область':      { en: 'Ternopil Oblast',       ru: 'Тернопольская область' },
-  'Харківська область':         { en: 'Kharkiv Oblast',        ru: 'Харьковская область' },
+  'Тернопільська область':      { en: 'Ternopol Oblast',       ru: 'Тернопольская область' },
+  'Харківська область':         { en: 'Kharkov Oblast',        ru: 'Харьковская область' },
   'Херсонська область':         { en: 'Kherson Oblast',        ru: 'Херсонская область' },
-  'Хмельницька область':        { en: 'Khmelnytskyi Oblast',   ru: 'Хмельницкая область' },
-  'Черкаська область':          { en: 'Cherkasy Oblast',       ru: 'Черкасская область' },
-  'Чернівецька область':        { en: 'Chernivtsi Oblast',     ru: 'Черновицкая область' },
-  'Чернігівська область':       { en: 'Chernihiv Oblast',      ru: 'Черниговская область' },
+  'Хмельницька область':        { en: 'Khmelnitsky Oblast',    ru: 'Хмельницкая область' },
+  'Черкаська область':          { en: 'Cherkassy Oblast',      ru: 'Черкасская область' },
+  'Чернівецька область':        { en: 'Chernovtsy Oblast',     ru: 'Черновицкая область' },
+  'Чернігівська область':       { en: 'Chernigov Oblast',      ru: 'Черниговская область' },
   'Автономна Республіка Крим':  { en: 'Crimea',                ru: 'Республика Крым' },
   'Севастополь':                { en: 'Sevastopol',            ru: 'Севастополь' },
 };
@@ -325,7 +330,7 @@ function localizedOblastName(uaName) {
 }
 
 // Russia's claimed administrative border within Ukraine — but only the segments that run
-// between the 5 claimed regions (Crimea, 2014; Donetsk, Luhansk, Zaporizhzhia, Kherson
+// between the 5 claimed regions (Crimea, 2014; Donetsk, Lugansk, Zaporozhye, Kherson
 // oblasts, 2022) and other, non-claimed Ukrainian oblasts, independent of actual
 // front-line control. Segments that instead fall on Ukraine's real national perimeter —
 // the actual Russia/Belarus international border, or coastline — are deliberately
@@ -343,7 +348,7 @@ function localizedOblastName(uaName) {
 // was 377 points over 1060 km — one vertex every 1.9 km — and ran a mean of 774 m, and up
 // to 6.8 km, off the true oblast boundary, so it visibly cut corners across the boundary
 // lines the basemap itself draws. That was the source data, not this line: oblasts.geojson
-// was pre-generalised (Luhansk 263 points against OSM's 24,019). Now 1022 points at a mean
+// was pre-generalised (Lugansk 263 points against OSM's 24,019). Now 1022 points at a mean
 // of 15 m, max 99 m. If it ever looks wrong again, measure oblasts.geojson's vertex spacing
 // before touching SIMPLIFY_TOLERANCE_M — the tolerance was never what bounded this.
 var CLAIMED_BORDER = [
