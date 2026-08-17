@@ -776,8 +776,10 @@ function closeGaps(fc) {
   return { type: 'FeatureCollection', features: out };
 }
 
-// Raw (pre-closeGaps) fetched data, kept so the historical calendar view (below) can
-// reconstruct a past date's state from the same source the live view uses.
+// Raw (pre-closeGaps) control_regions.geojson, used ONLY by the historical calendar view.
+// Empty until a reader opens a past date — the live view runs off fill tiles now and never
+// fetches this file. ensureFullRegions() is what populates it; nothing else should, and
+// nothing on the live path may assume it has anything in it.
 var rawRegionsFC = { type: 'FeatureCollection', features: [] };
 var selectedDate = null;   // non-null while viewing a past date instead of the live fetch
 
@@ -831,8 +833,17 @@ function paintStyle(p, highlightIds) {
 // same-tile neighbour's outline, bbox-prefiltered so only genuinely nearby features are
 // ever tested. Cosmetic only, like closeGaps() below — never written back to any data file.
 // PARKED 2026-08-06 — flip to true to bring the casings back. Everything below stays wired
-// up and callable; only the draw is switched off, so reviving this is a one-word change and
-// not an archaeology exercise. Turned off because the proximity-sampling classification was
+// up and callable; only the draw is switched off.
+// **Reviving this is no longer a one-word change, as of the 2026-08-13 fill-tile split.**
+// renderRegionsLayer() is the only caller, and the live view no longer goes through it — it
+// draws from fills/{z}/{x}/{y}.json, where each feature is clipped to its tile. Proximity
+// classification needs whole outlines and every nearby neighbour, so tiles cannot feed it.
+// Flipping the flag alone brings the casings back on the historical calendar view only.
+// Two ways to give the live view its casings back, if that is wanted: call
+// ensureFullRegions() on the live path too (cheap in code, but re-bills every reader for the
+// 578 KB file this split just stopped sending), or precompute the classified segments in
+// editor.html at publish time and ship them as their own small file, which is the shape the
+// rest of the published projection already takes (territory_stats.json, frontline_history.json). Turned off because the proximity-sampling classification was
 // still getting two things visibly wrong after the merge-chord fix, and the operator judged
 // further chasing not worth it for what is only a zoomed-out legibility aid:
 //
@@ -1094,26 +1105,299 @@ function renderRegionsLayer(data, highlightIds) {
   buildContestedEdges(data.features || []);
 }
 
-function loadRegions() {
-  fetch('control_regions.geojson?_=' + Date.now())
+// ── Fill tiles: the live view's delivery mechanism ─────────────────────────────────
+// The live view used to fetch the whole of control_regions.geojson (578 KB, 156 KB gzipped)
+// on every load and on every 60 s refresh, including every oblast the reader is nowhere near,
+// and then spend 1.3 s in closeGaps() re-deriving the same 15 m buffer the previous load
+// already derived. Both are gone: editor.html now bakes that buffer in at publish time and
+// cuts the result into a fills/{z}/{x}/{y}.json pyramid, and this fetches only the tiles the
+// current viewport actually covers. Measured against the file this replaces: the opening z7
+// view costs 27.9 KB instead of 156 KB (12.5 KB on a phone), a z12 view of the front costs
+// 0.9 KB, and the fills appear in ~120 ms instead of ~1450 ms.
+//
+// The tiles carry geometry only. Everything that decides how a shape is PAINTED — faction,
+// pattern, zone_type, last_updated, faction_set_at, exclude_from_timeline — lives in
+// fills/props.json under the feature id, because a feature spans many tiles and repeating its
+// properties in each one measured larger than the whole properties file (126 KB against 5 KB).
+// The names in props.json are the feature's own property names, deliberately: paintStyle(),
+// isRecentRegion() and isHighlighted() then read a tile feature exactly as they read a
+// control_regions.geojson feature, with no translation layer to drift out of step.
+//
+// Three things here are load-bearing and none is obvious from the code alone:
+//
+//   1. **The tile grid is EPSG:3857, always — never Leaflet's.** This map switches its CRS
+//      to EPSG:3395 whenever a Yandex basemap is selected (see selectBasemap()), so
+//      map.project() and Leaflet's own tile coordinates mean different ground depending on
+//      which basemap happens to be showing. The tile x/y below is derived from getBounds()
+//      lat/lng through this file's own spherical Mercator maths instead, so a tile names the
+//      same ground under either CRS. Using map.project() here would misalign every fill
+//      against the basemap the moment the reader picks Yandex.
+//   2. **Pieces are clipped exactly at the tile edge, with no overlap margin**, which is what
+//      keeps CONVENTIONS §10's draw order safe across tiles. Within one tile the features are
+//      in the published array order, so oblast washes still come first; across tiles the
+//      pieces are spatially disjoint, so the order tiles happen to arrive in cannot bury
+//      anything. An overlap margin would break that, and would also double-draw the
+//      antialiased edges of the attack hatch's transparent gaps.
+//   3. **maxZoom in the manifest is the deepest tile that exists, not the deepest the reader
+//      can go.** Above it the same tiles are reused (Leaflet is drawing vectors, not images,
+//      so there is nothing to upscale), which is why the top zoom is published unsimplified
+//      while every zoom below it is simplified to 0.4 px of its own scale.
+var FILL_DIR = 'fills';
+var FILL_TILE_PAD = 0.25;      // fetch a quarter-viewport beyond the edge so a pan doesn't flash
+var FILL_CACHE_MAX = 600;      // parsed tiles kept in memory; the whole z10 set is ~1000
+
+var fillProps = null;          // id -> the feature properties paintStyle() needs
+var fillManifest = null;       // { minZoom, maxZoom, built, tiles: { z: { x: [y, ...] } } }
+var fillCache = new Map();     // "z/x/y" -> [ { i: id, g: geometry } ]
+var fillPending = new Map();   // "z/x/y" -> Promise, so a pan never re-requests in flight
+
+var MERC_R = 6378137, MERC_HALF = Math.PI * MERC_R;
+function lngToMerc(lng) { return lng * MERC_HALF / 180; }
+function latToMerc(lat) {
+  var l = Math.max(-85.051129, Math.min(85.051129, lat));
+  return Math.log(Math.tan((90 + l) * Math.PI / 360)) * MERC_R;
+}
+function mercTileX(lng, z) {
+  return Math.floor((lngToMerc(lng) + MERC_HALF) / (2 * MERC_HALF / Math.pow(2, z)));
+}
+function mercTileY(lat, z) {
+  return Math.floor((MERC_HALF - latToMerc(lat)) / (2 * MERC_HALF / Math.pow(2, z)));
+}
+
+function fillTileZoom() {
+  if (!fillManifest) return null;
+  return Math.max(fillManifest.minZoom, Math.min(fillManifest.maxZoom, Math.round(map.getZoom())));
+}
+
+// The manifest is what stops a pan over empty steppe firing a burst of 404s: only tiles that
+// were actually written are ever requested.
+function fillTileExists(z, x, y) {
+  var byX = fillManifest && fillManifest.tiles && fillManifest.tiles[z];
+  var ys = byX && byX[x];
+  return !!ys && ys.indexOf(y) !== -1;
+}
+
+function visibleFillTiles() {
+  var z = fillTileZoom();
+  if (z === null) return [];
+  var b = map.getBounds().pad(FILL_TILE_PAD);
+  var n = Math.pow(2, z);
+  var x0 = Math.max(0, mercTileX(Math.max(-180, b.getWest()), z));
+  var x1 = Math.min(n - 1, mercTileX(Math.min(180, b.getEast()), z));
+  var y0 = Math.max(0, mercTileY(b.getNorth(), z));
+  var y1 = Math.min(n - 1, mercTileY(b.getSouth(), z));
+  var keys = [];
+  for (var x = x0; x <= x1; x++) {
+    for (var y = y0; y <= y1; y++) {
+      if (fillTileExists(z, x, y)) keys.push(z + '/' + x + '/' + y);
+    }
+  }
+  return keys;
+}
+
+// Every visible tile's pieces are drawn into ONE layer, rebuilt whenever the visible set
+// changes, in the published draw order — NOT one layer per tile.
+//
+// One layer per tile was the obvious shape and it is wrong, in a way that only a pixel diff
+// catches. The pieces themselves are disjoint, so it is tempting to conclude the order tiles
+// arrive in cannot matter. But every fill also carries a 1 px stroke in its own colour (the
+// hairline closer — see factionStyle()), and a stroke straddles the edge it is drawn on. So a
+// tile arriving late strokes half a pixel PAST its own boundary, over ground the neighbouring
+// tile already painted. Where an oblast wash in one tile abuts a settlement claim in the next,
+// that is the wash's colour laid over the claim along the seam: a faint grid, drawn in exactly
+// the failure mode CONVENTIONS §10 calls the recurring one. Measured before this was fixed —
+// 0.07% of pixels differing hard from the single-file render at z9, in thin lines on tile
+// boundaries; after, 0.000%.
+//
+// Sorting by `o` — the feature's index in the published array, stamped into props.json by
+// editor.html — reproduces the file's own order exactly, which is what makes the result
+// identical to rendering the whole file. Do not replace this with "oblasts first, then the
+// rest": that is the invariant §10 states, but it is weaker than the file's order, and the
+// order among the rest is load-bearing wherever two hand-drawn claims overlap.
+var fillLayer = null, fillScrimLayer = null, fillRenderedSig = '';
+
+function renderFillTiles() {
+  var keys = visibleFillTiles().filter(function (k) { return fillCache.has(k); });
+  var sig = keys.join(' ');
+  if (sig === fillRenderedSig) return;   // nothing new landed and nothing left the view
+  fillRenderedSig = sig;
+
+  // Every piece of one feature is merged back into a single MultiPolygon before it is drawn,
+  // and this is not a micro-optimisation — it is what makes the tiles look like the file.
+  //
+  // Drawn as separate layers, each piece is its own canvas path, so every tile cut becomes a
+  // real edge: antialiased on both sides (two half-covered pixels compositing to ~75%, a pale
+  // seam) and, worse, STROKED, because factionStyle() gives every fill a 1 px hairline in its
+  // own colour. That stroke paints the invented edge over whatever is beneath it — measured at
+  // z10 as a 2 px line of contested hatch running down the x=618/619 tile boundary, across
+  // solid Ukraine blue.
+  //
+  // Merged, those cuts are interior to one path. Leaflet traces the whole MultiPolygon and
+  // calls fill() once, so coincident edges simply are not edges and no seam is rasterised; the
+  // stroke follows the same path, so where it does run along a cut it lands on that feature's
+  // own fill, in that feature's own colour and (for a hatch) its own pattern phase, and
+  // vanishes. Requires the tiles to be clipped WITHOUT an overlap margin: Leaflet fills
+  // polygons even-odd, so overlapping pieces of one feature would punch each other out.
+  var byId = new Map();
+  keys.forEach(function (k) {
+    fillCache.get(k).forEach(function (it) {
+      var e = byId.get(it.i);
+      if (!e) { e = { id: it.i, polys: [] }; byId.set(it.i, e); }
+      if (it.g.type === 'Polygon') e.polys.push(it.g.coordinates);
+      else if (it.g.type === 'MultiPolygon') {
+        it.g.coordinates.forEach(function (poly) { e.polys.push(poly); });
+      }
+    });
+  });
+  var feats = [];
+  byId.forEach(function (e) {
+    var p = (fillProps && fillProps[e.id]) || { id: e.id };
+    feats.push({ type: 'Feature', properties: p,
+                 geometry: { type: 'MultiPolygon', coordinates: e.polys } });
+  });
+  // CONVENTIONS §10's draw order, restored from the published array index. Map iteration is
+  // insertion order — i.e. whichever tile happened to arrive first — so this sort is the only
+  // thing standing between the reader and an oblast wash painted over the claims inside it.
+  feats.sort(function (a, b) { return (a.properties.o || 0) - (b.properties.o || 0); });
+
+  if (fillLayer) map.removeLayer(fillLayer);
+  if (fillScrimLayer) map.removeLayer(fillScrimLayer);
+  fillLayer = fillScrimLayer = null;
+  if (!feats.length) return;
+
+  // Same pairing as renderRegionsLayer(): the scrim goes down first, in its own pane under
+  // 'fills', over exactly the features the fill will highlight — isHighlighted() is the one
+  // test both consult, so a scrim can never show through as a pale patch under a plain fill.
+  var hl = feats.filter(function (f) { return isHighlighted(f.properties || {}, null); });
+  if (hl.length) {
+    fillScrimLayer = L.geoJSON({ type: 'FeatureCollection', features: hl }, {
+      pane: 'highlightScrim', renderer: highlightScrimR, style: highlightScrimStyle,
+    }).addTo(map);
+  }
+  fillLayer = L.geoJSON({ type: 'FeatureCollection', features: feats }, {
+    pane: 'fills', renderer: fillsR,
+    style: function (f) { return paintStyle(f.properties || {}, null); },
+  }).addTo(map);
+}
+
+function fetchFillTile(key) {
+  if (fillCache.has(key)) return Promise.resolve(fillCache.get(key));
+  if (fillPending.has(key)) return fillPending.get(key);
+  // No cache-buster: tiles are content-addressed by what is in them, and a save that changes
+  // a tile changes the manifest's `built`, which is what drops the cache below. Busting every
+  // tile request would throw away the browser cache that makes panning back free.
+  var p = fetch(FILL_DIR + '/' + key + '.json')
     .then(function (r) {
-      if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     })
-    .then(function (data) {
-      rawRegionsFC = data;
-      if (!selectedDate) renderRegionsLayer(data, null);
-      counts.regions = (data.features || []).length;
-      errors.regions = null;
-      report();
+    .then(function (d) {
+      var items = (d && d.f) || [];
+      fillCache.set(key, items);
+      if (fillCache.size > FILL_CACHE_MAX) {
+        // Map iterates in insertion order, so the oldest tile is the first key out. Anything
+        // currently on screen is off limits — evicting it would blank part of the view until
+        // the refetch landed.
+        var onScreen = new Set(visibleFillTiles());
+        var it = fillCache.keys();
+        for (var n = fillCache.size; n > FILL_CACHE_MAX; n--) {
+          var oldest = it.next().value;
+          if (oldest === undefined) break;
+          if (!onScreen.has(oldest)) fillCache.delete(oldest);
+        }
+      }
+      return items;
     })
-    .catch(function (err) {
-      // A repo with no wholesale territory yet is a valid state, not a failure.
-      if (err.missing) { counts.regions = 0; errors.regions = null; }
-      else errors.regions = err.message;
+    .finally(function () { fillPending.delete(key); });
+  fillPending.set(key, p);
+  return p;
+}
+
+// Called on every move/zoom and after every manifest refresh. Cheap when nothing moved:
+// renderFillTiles() compares the visible tile list against what it last drew and returns
+// immediately if it is the same, so a pan that stays inside the padded set costs nothing.
+function refreshFillTiles() {
+  if (!fillManifest || !fillProps || selectedDate) return;
+  var want = visibleFillTiles();
+  renderFillTiles();   // draw what is already cached now, rather than waiting on the network
+  want.forEach(function (key) {
+    if (fillCache.has(key) || fillPending.has(key)) return;
+    fetchFillTile(key).then(function () {
+      // The reader may have panned away, or opened a past date, while this was in flight.
+      if (selectedDate) return;
+      renderFillTiles();
+    }).catch(function (err) {
+      errors.regions = err.message;
       report();
     });
+  });
+}
+
+function clearFillTiles() {
+  if (fillLayer) map.removeLayer(fillLayer);
+  if (fillScrimLayer) map.removeLayer(fillScrimLayer);
+  fillLayer = fillScrimLayer = null;
+  fillRenderedSig = '';
+}
+
+// The 60 s poll re-reads only the manifest and props — 3 KB and 5 KB — and touches the tiles
+// themselves only if `built` moved, i.e. only if the operator actually published. That is the
+// whole reason a refresh is nearly free now: an unchanged map costs two small conditional
+// requests instead of re-downloading and re-buffering every fill on the front.
+function loadFillTiles() {
+  var bust = '?_=' + Date.now();
+  Promise.all([
+    fetch(FILL_DIR + '/manifest.json' + bust).then(function (r) {
+      if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }),
+    fetch(FILL_DIR + '/props.json' + bust).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }),
+  ]).then(function (both) {
+    var manifest = both[0], props = both[1];
+    var republished = !fillManifest || fillManifest.built !== manifest.built;
+    fillManifest = manifest;
+    fillProps = props;
+    if (republished) {
+      clearFillTiles();
+      fillCache.clear();
+      fillPending.clear();
+    }
+    counts.regions = Object.keys(props).length;
+    errors.regions = null;
+    refreshFillTiles();
+    report();
+  }).catch(function (err) {
+    // A repo with no published territory yet is a valid state, not a failure.
+    if (err.missing) { counts.regions = 0; errors.regions = null; }
+    else errors.regions = err.message;
+    report();
+  });
+}
+
+map.on('moveend zoomend', refreshFillTiles);
+
+// The full control_regions.geojson is no longer part of the live path, but the calendar view
+// still needs it: reconstructStateAsOf() replays history entries against every live feature,
+// including ones nowhere near the current viewport, and a tile only ever holds the piece of a
+// feature that fell inside it. So it is fetched once, lazily, the first time a reader opens a
+// past date — a feature most readers never touch, now paying for itself instead of being
+// billed to everyone on arrival.
+var fullRegionsPromise = null;
+function ensureFullRegions() {
+  if (!fullRegionsPromise) {
+    fullRegionsPromise = fetch('control_regions.geojson?_=' + Date.now())
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) { rawRegionsFC = data; return data; })
+      .catch(function (err) { fullRegionsPromise = null; throw err; });
+  }
+  return fullRegionsPromise;
 }
 
 // ── Territory-held-per-side stats widget ────────────────────────────────────────────
@@ -1304,11 +1588,8 @@ function groupDelta(group) {
 // feature still does, and a hatch is not something the operator flips back and forth, so
 // reading it off current state covers the tail of the retention window well enough.
 function livePatternOf(id) {
-  var fs = rawRegionsFC.features || [];
-  for (var i = 0; i < fs.length; i++) {
-    if (fs[i].properties && fs[i].properties.id === id) return fs[i].properties.pattern || null;
-  }
-  return null;
+  var p = fillProps && fillProps[id];
+  return (p && p.pattern) || null;
 }
 
 var OPPOSING_FACTION = { ukraine: 'russia', russia: 'ukraine' };
@@ -1496,21 +1777,37 @@ function reconstructStateAsOf(targetDate) {
   };
 }
 
+// A past date is drawn from the full file, not from tiles — see ensureFullRegions() for why —
+// so this is the one path in the viewer that still waits on a network fetch before it can
+// draw. selectedDate is set FIRST, so the tile layer stops rendering the live front the
+// moment the reader picks a date rather than leaving it up for the length of the fetch.
 function showHistoricalDate(targetDate) {
   if (!lastHistory) return;
   selectedDate = targetDate;
-  var result = reconstructStateAsOf(targetDate);
-  renderRegionsLayer(result.regions, result.changedIds);
+  clearFillTiles();
   document.getElementById('history-live').classList.remove('active');
   document.getElementById('history-live').disabled = false;
   document.getElementById('status-msg').textContent = t('showingAsOf')(targetDate);
   document.getElementById('status-msg').className = '';
+  ensureFullRegions().then(function () {
+    if (selectedDate !== targetDate) return;   // the reader moved on while this was in flight
+    var result = reconstructStateAsOf(targetDate);
+    renderRegionsLayer(result.regions, result.changedIds);
+  }).catch(function (err) {
+    if (selectedDate !== targetDate) return;
+    document.getElementById('status-msg').textContent = t('controlAreasUnavailable')(err.message);
+    document.getElementById('status-msg').className = 'err';
+  });
 }
 function showLive() {
   selectedDate = null;
   document.getElementById('history-date').value = '';
   document.getElementById('history-live').classList.add('active');
-  renderRegionsLayer(rawRegionsFC, null);
+  // Drop the reconstructed full-file layers and hand the live view back to the tiles.
+  if (regionLayer) { map.removeLayer(regionLayer); regionLayer = null; }
+  if (highlightScrimLayer) { map.removeLayer(highlightScrimLayer); highlightScrimLayer = null; }
+  contestedEdgeGroup.clearLayers();
+  refreshFillTiles();
   report();
 }
 
@@ -1519,7 +1816,7 @@ document.getElementById('history-date').addEventListener('change', function (e) 
 });
 document.getElementById('history-live').addEventListener('click', showLive);
 
-function refresh() { loadRegions(); loadStats(); loadHistory(); }
+function refresh() { loadFillTiles(); loadStats(); loadHistory(); }
 
 // ── Measure tool: draw a polygon, report area (km²) and perimeter (km) ─────────────
 // A public-viewer aid, not territory data — its own pane with a dashed outline, so it
