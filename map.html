@@ -389,10 +389,23 @@ var satellite = L.tileLayer(
   { attribution: 'Tiles &copy; Esri', maxZoom: 18, crsKey: '3857',
     highlightScrim: HIGHLIGHT_SCRIM_STRENGTH }
 );
-var yandexHybrid = L.tileLayer(
-  'https://core-sat.maps.yandex.net/tiles?l=sat,skl&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
-  { attribution: '&copy; Яндекс', maxZoom: 18, crsKey: '3395', highlightScrim: HIGHLIGHT_SCRIM_STRENGTH }
-);
+// Yandex serves the imagery and its label overlay from two different hosts, and core-sat
+// carries only the imagery: it ignores `l` entirely and hands back the identical `sat` JPEG
+// for `l=sat,skl`, which is why the single combined request drew no settlement names. The
+// `skl` labels are a transparent PNG from core-renderer-tiles, so the hybrid is the two
+// stacked. zIndex is explicit rather than left to the order L.LayerGroup happens to add them
+// in, because switching basemaps tears both down and re-adds them. crsKey/highlightScrim live
+// on the group, which is what selectBasemap() and applyHighlightScrim() are handed.
+var yandexHybrid = L.layerGroup([
+  L.tileLayer(
+    'https://core-sat.maps.yandex.net/tiles?l=sat&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
+    { attribution: '&copy; Яндекс', maxZoom: 18, zIndex: 1 }
+  ),
+  L.tileLayer(
+    'https://core-renderer-tiles.maps.yandex.net/tiles?l=skl&x={x}&y={y}&z={z}&scale=1&lang=ru_RU',
+    { maxZoom: 18, zIndex: 2 }
+  ),
+], { crsKey: '3395', highlightScrim: HIGHLIGHT_SCRIM_STRENGTH });
 var googleHybrid = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
   attribution: '&copy; Google', maxZoom: 20, subdomains: ['0','1','2','3'], crsKey: '3857',
   highlightScrim: HIGHLIGHT_SCRIM_STRENGTH,
