@@ -468,14 +468,26 @@ function flashSettlement(r) {
     if (searchPin) { map.removeLayer(searchPin); searchPin = null; }
   }, 4000);
 }
-var settlementSearch = SettlementSearch.mount({
-  container: document.getElementById('search-slot'),
-  lang: currentLang,
-  onPick: function (r) {
-    map.setView([r.lat, r.lon], SettlementSearch.zoomFor(r.rank));
-    flashSettlement(r);
-  },
-});
+// Guarded because settlement_search.js is a SEPARATE FILE, and a separate file can be
+// absent: an editor that published map.html without it, a half-propagated Pages deploy.
+// Unguarded, `SettlementSearch` being undefined threw right here and took the whole rest
+// of this script with it — no basemap switcher, no fills, a map stuck forever on
+// "Loading territory…" because of a search box. That happened live on 2026-08-24.
+// The search is an addition; the map is the product. If the module is not there, the map
+// still draws and only the field is missing.
+var settlementSearch = null;
+if (window.SettlementSearch) {
+  settlementSearch = SettlementSearch.mount({
+    container: document.getElementById('search-slot'),
+    lang: currentLang,
+    onPick: function (r) {
+      map.setView([r.lat, r.lon], SettlementSearch.zoomFor(r.rank));
+      flashSettlement(r);
+    },
+  });
+} else {
+  console.warn('settlement_search.js did not load — settlement search disabled; map unaffected');
+}
 
 // Hand-rolled grouped basemap switcher — Leaflet's built-in L.control.layers has no concept
 // of groups. One radio group across all three sections; only ever one tile layer active.
@@ -1992,7 +2004,7 @@ function setLanguage(lang) {
   // Chrome only — the placeholder and the "village/hamlet" labels. Which of
   // name:uk / name:ru / name:en a result is shown under follows from this too,
   // but the names themselves are never translated (CONVENTIONS.md §6).
-  settlementSearch.setLang(currentLang);
+  if (settlementSearch) settlementSearch.setLang(currentLang);
   if (selectedDate) {
     document.getElementById('status-msg').textContent = t('showingAsOf')(selectedDate);
   }
