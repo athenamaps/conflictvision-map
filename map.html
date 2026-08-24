@@ -162,6 +162,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 <div id="toolbar">
   <h1 id="app-title">⚔ CONFLICT MAP</h1>
   <button class="tool" id="tool-measure" title="Draw a polygon to measure its area and perimeter">📐 Measure</button>
+  <span id="search-slot"></span>
   <button class="tool" id="tool-lang" title="Switch language">RU</button>
   <span id="last-updated">Loading…</span>
 </div>
@@ -189,6 +190,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+<!-- Local, and shared verbatim with editor.html. It fetches settlement_index.json
+     lazily on the first focus of the search field, so the opening view still costs
+     what it did before this feature existed. -->
+<script src="settlement_search.js"></script>
 
 <script>
 // Faction ids, colours AND display names must stay identical to listener.py,
@@ -445,6 +450,32 @@ map.attributionControl.addAttribution(
   'Boundaries derived from <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)'
 );
 L.control.scale({ position: 'bottomleft', imperial: false }).addTo(map);
+
+// ── Settlement search ───────────────────────────────────────────────────────
+// The field lives in the toolbar; settlement_search.js owns the matching and the
+// dropdown, and map.html owns only what happens on a pick. See that file's header
+// for why a Russian query finds a Ukrainian name and why "Kiev" and "Kyiv" both work.
+var searchPin = null;
+function flashSettlement(r) {
+  if (searchPin) { map.removeLayer(searchPin); searchPin = null; }
+  searchPin = L.circleMarker([r.lat, r.lon], {
+    radius: 7, weight: 2.5, color: '#facc15', fillColor: '#facc15', fillOpacity: 0.25,
+  }).addTo(map);
+  // A marker that stays would accumulate over a session of searching and would
+  // sit on top of the fills the reader came here to read. It is a "here it is"
+  // pointer, not a pin, so it clears itself.
+  setTimeout(function () {
+    if (searchPin) { map.removeLayer(searchPin); searchPin = null; }
+  }, 4000);
+}
+var settlementSearch = SettlementSearch.mount({
+  container: document.getElementById('search-slot'),
+  lang: currentLang,
+  onPick: function (r) {
+    map.setView([r.lat, r.lon], SettlementSearch.zoomFor(r.rank));
+    flashSettlement(r);
+  },
+});
 
 // Hand-rolled grouped basemap switcher — Leaflet's built-in L.control.layers has no concept
 // of groups. One radio group across all three sections; only ever one tile layer active.
@@ -1958,6 +1989,10 @@ function setLanguage(lang) {
   // is what preserves the selection across this rebuild.
   rebuildBasemapControl();
   updateMeasureReadout();
+  // Chrome only — the placeholder and the "village/hamlet" labels. Which of
+  // name:uk / name:ru / name:en a result is shown under follows from this too,
+  // but the names themselves are never translated (CONVENTIONS.md §6).
+  settlementSearch.setLang(currentLang);
   if (selectedDate) {
     document.getElementById('status-msg').textContent = t('showingAsOf')(selectedDate);
   }
