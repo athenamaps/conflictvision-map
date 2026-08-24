@@ -104,7 +104,9 @@ window.SettlementSearch = (function () {
 
   function load(url) {
     if (loading) return loading;
-    loading = fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'v=1')
+    // Bump this whenever the row or oblast layout changes, so a browser cannot pair a
+    // cached older index with newer code. v=2: oblasts became [uk, ru, en] triples.
+    loading = fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'v=2')
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -174,7 +176,10 @@ window.SettlementSearch = (function () {
       return {
         uk: r[UK], ru: r[RU], en: r[EN], old: r[OLD],
         lat: r[LAT], lon: r[LON], rank: r[RANK],
-        oblast: data.oblasts[r[OBLAST]],
+        // Raw [uk, ru, en]; resolved against the interface language at render and at
+        // pick time rather than here, so a language switch with the dropdown open
+        // relabels the results that are already on screen.
+        oblastForms: data.oblasts[r[OBLAST]],
         score: h[1],
         // Surfaced only when the query actually reached this row through the
         // former name — otherwise "Бахмут · formerly Артёмовск" would show on
@@ -215,11 +220,30 @@ window.SettlementSearch = (function () {
     if (lang === 'en') return r.en || r.uk || r.ru;
     return r.uk || r.ru || r.en;
   }
-  // The oblast list is Ukrainian, as oblasts.geojson stores it. Trimming
-  // "область" keeps the dropdown's second line short enough to read at a
-  // glance, which is its whole job — telling fifteen Запоріжжя apart.
+  /* The index carries each oblast as [uk, ru, en], straight out of oblasts.geojson,
+     so the second line of a result follows the interface language rather than always
+     reading Ukrainian. The English forms there are the OLD, Russian-derived
+     transliterations — Lugansk, Kharkov, Kiev, Nikolaev — deliberately, so the dropdown
+     agrees with map.html's stats panel and with the operator's own region names
+     ("Ukraine-Kharkov"). See docs/CLAUDE.md. Do not "fix" them to Luhansk/Kharkiv.
+
+     Tolerates a plain string too: an older index paired with this module by a browser
+     cache would otherwise render "undefined" under every result. */
+  function oblastName(entry, lang) {
+    if (typeof entry === 'string') return entry;
+    if (!entry) return '';
+    var i = lang === 'ru' ? 1 : lang === 'en' ? 2 : 0;
+    return entry[i] || entry[0] || '';
+  }
+
+  // Trimming the "oblast" word keeps the line short enough to read at a glance, which is
+  // its whole job — telling fifteen Запоріжжя apart. One pattern per language.
   function shortOblast(name) {
-    return (name || '').replace(/\s*область$/, '').replace(/^Автономна Республіка\s*/, '');
+    return (name || '')
+      .replace(/\s*(область|Oblast)$/i, '')
+      .replace(/^(Автономна Республіка|Автономная Республика)\s*/, '')
+      .replace(/^Autonomous Republic of\s*/i, '')
+      .trim();
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -322,7 +346,7 @@ window.SettlementSearch = (function () {
       var html = '';
       for (var i = 0; i < results.length; i++) {
         var r = results[i];
-        var meta = shortOblast(r.oblast) + ' · ' + T().place[r.rank];
+        var meta = esc(shortOblast(oblastName(r.oblastForms, lang))) + ' · ' + T().place[r.rank];
         if (r.matchedOld) meta += ' · ' + T().formerly + ' ' + esc(r.old);
         html += '<div class="ss-item' + (i === sel ? ' sel' : '') + '" data-i="' + i + '">'
               + '<div class="ss-name">' + esc(displayName(r, lang)) + '</div>'
@@ -363,6 +387,9 @@ window.SettlementSearch = (function () {
       if (!r) return;
       close();
       input.blur();
+      // Resolved here so the page's own handler (a status line, a log) names the oblast
+      // in the language the operator is reading, without needing to know the format.
+      r.oblast = oblastName(r.oblastForms, lang);
       if (opts.onPick) opts.onPick(r);
     }
 
