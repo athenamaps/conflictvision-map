@@ -236,14 +236,12 @@ window.SettlementSearch = (function () {
     return entry[i] || entry[0] || '';
   }
 
-  // Trimming the "oblast" word keeps the line short enough to read at a glance, which is
-  // its whole job — telling fifteen Запоріжжя apart. One pattern per language.
-  function shortOblast(name) {
-    return (name || '')
-      .replace(/\s*(область|Oblast)$/i, '')
-      .replace(/^(Автономна Республіка|Автономная Республика)\s*/, '')
-      .replace(/^Autonomous Republic of\s*/i, '')
-      .trim();
+  // Shown in full — "Kiev Oblast", "Киевская область", "Autonomous Republic of Crimea".
+  // An earlier version trimmed the "oblast" word to save width, which read as a bare
+  // repetition next to a same-named city ("Kiev · Kiev") and lost the only thing that
+  // told the reader the second line was a region at all.
+  function oblastLabel(entry, lang) {
+    return (oblastName(entry, lang) || '').trim();
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -346,7 +344,7 @@ window.SettlementSearch = (function () {
       var html = '';
       for (var i = 0; i < results.length; i++) {
         var r = results[i];
-        var meta = esc(shortOblast(oblastName(r.oblastForms, lang))) + ' · ' + T().place[r.rank];
+        var meta = esc(oblastLabel(r.oblastForms, lang)) + ' · ' + T().place[r.rank];
         if (r.matchedOld) meta += ' · ' + T().formerly + ' ' + esc(r.old);
         html += '<div class="ss-item' + (i === sel ? ' sel' : '') + '" data-i="' + i + '">'
               + '<div class="ss-name">' + esc(displayName(r, lang)) + '</div>'
