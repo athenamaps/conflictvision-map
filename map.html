@@ -155,6 +155,35 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 }
 #history-live.active { background: #1d4ed8; border-color: #2563eb; color: #fff; }
 #history-live:disabled { opacity: .45; cursor: default; }
+
+/* Methodology panel (step1-architecture.md §7.3) — the reader-facing half of
+   docs/METHODOLOGY.md. Its text lives in the METHODOLOGY table below, beside STRINGS, and is
+   rendered from t()-adjacent code so the language toggle drives it like every other bit of
+   chrome. Deliberately IN this file rather than a sibling page: anything map.html loads from
+   a second file of ours has to be published in the same save, and when it is not, the 404
+   takes the whole page down — that is exactly how settlement_search.js broke the public map
+   on 2026-08-24 (CLAUDE.md). A panel that ships inside the page cannot 404. */
+#methodology-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 2000;
+  display: none; align-items: center; justify-content: center; padding: 24px;
+}
+#methodology-overlay.open { display: flex; }
+#methodology {
+  background: #1b1b1b; border: 1px solid #383838; border-radius: 10px;
+  width: 100%; max-width: 640px; max-height: 100%; overflow-y: auto;
+  padding: 20px 22px; box-shadow: 0 10px 50px rgba(0,0,0,.7);
+}
+#methodology h2 { font-size: 15px; font-weight: 600; color: #eee; margin-bottom: 4px; }
+#methodology .lede { font-size: 12px; color: #777; margin-bottom: 12px; }
+#methodology h3 {
+  font-size: 11px; font-weight: 600; color: #ddd; margin: 16px 0 5px;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+#methodology p { font-size: 12.5px; line-height: 1.55; color: #b8b8b8; margin-bottom: 8px; }
+#methodology ul { margin: 0 0 8px 18px; }
+#methodology li { font-size: 12.5px; line-height: 1.5; color: #b8b8b8; margin-bottom: 4px; }
+#methodology b { color: #ddd; font-weight: 600; }
+#methodology .close-row { display: flex; justify-content: flex-end; margin-top: 16px; }
 </style>
 </head>
 <body>
@@ -164,6 +193,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   <button class="tool" id="tool-measure" title="Draw a polygon to measure its area and perimeter">📐 Measure</button>
   <span id="search-slot"></span>
   <button class="tool" id="tool-lang" title="Switch language">RU</button>
+  <button class="tool" id="tool-methodology" title="How this map is made">&#9432; Methodology</button>
   <span id="last-updated">Loading…</span>
 </div>
 
@@ -180,6 +210,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
     <input type="date" id="history-date" title="Select a date to revert the frontline to how it looked at the end of that day"/>
     <button id="history-live" class="active" title="Return to the live, current frontline">● Live</button>
   </div>
+</div>
+
+<div id="methodology-overlay">
+  <div id="methodology" role="dialog" aria-modal="true" aria-labelledby="methodology-title"></div>
 </div>
 
 <div id="statusbar">
@@ -265,6 +299,8 @@ var STRINGS = {
   en: {
     measure: '📐 Measure',
     measureTitle: 'Draw a polygon to measure its area and perimeter',
+    methodology: 'ⓘ Methodology',
+    methodologyTitle: 'Where the data comes from, how a claim is checked, how errors are corrected',
     langToggleTitle: 'Switch to Russian',
     loading: 'Loading…',
     refreshed: function (time) { return 'Refreshed ' + time; },
@@ -299,6 +335,8 @@ var STRINGS = {
   ru: {
     measure: '📐 Измерить',
     measureTitle: 'Нарисуйте полигон, чтобы измерить площадь и периметр',
+    methodology: 'ⓘ Методика',
+    methodologyTitle: 'Откуда берутся данные, как проверяется утверждение, как исправляются ошибки',
     langToggleTitle: 'Switch to English',
     loading: 'Загрузка…',
     refreshed: function (time) { return 'Обновлено ' + time; },
@@ -328,6 +366,138 @@ var STRINGS = {
   },
 };
 function t(key) { return STRINGS[currentLang][key]; }
+
+// ── Methodology (step1-architecture.md §7.3) ────────────────────────────────────────
+// The reader-facing half of docs/METHODOLOGY.md. Keep the two in step — the long version is
+// what an auditor reads, this is what a reader reads, and a contradiction between them is
+// worse than either being thin.
+//
+// Held here rather than in STRINGS because it is prose, not chrome, and rebuilding the whole
+// panel on a language switch is one innerHTML write. Every string below is authored in this
+// file — none of it comes from data — so it is emitted as HTML on purpose. Nothing published
+// (a region name, a citation) may ever be spliced into it without going through esc().
+
+// The address corrections are sent to. Unset: the project's reader channel (§7.2) does not
+// exist yet, and an aspirational address on a public page is worse than an admitted gap — a
+// reader who writes to it and gets nothing back learns the project does not answer, which is
+// the opposite of what §7.3 is for. When the channel exists, set this to a URL or a plain
+// handle and update docs/METHODOLOGY.md §5 in the same commit; the panel renders either.
+var METHODOLOGY_CONTACT = null;
+
+var METHODOLOGY = {
+  en: {
+    title: "How this map is made",
+    lede: "Sources, checks, and corrections.",
+    close: "Close",
+    contactHead: "Where to write",
+    contactNone: "A public address for corrections is not set up yet. When it is, it will be published here.",
+    contactWith: function (c) { return "Corrections and questions: " + c; },
+    sections: [
+      { h: "Where the data comes from", p: [
+        "Every area on this map is drawn by hand from open sources — public Telegram and X posts, and published reporting. There is no satellite feed and no government data. Nothing publishes itself: each shape exists because a person read a source and drew it.",
+        "This is not a survey. A moving front is normally reported as “this settlement, around this date”, not as a metre-accurate line, so read the shapes as a claim about who holds which settlements and approaches — not as a traced boundary.",
+      ] },
+      { h: "What the colours claim", ul: [
+        "<b>Solid red or blue</b> — territory reported as held by that side.",
+        "<b>Two-tone hatch</b> — contested ground, held by neither side with confidence.",
+        "<b>Single-colour hatch</b> — a claim about fighting or an advance, not about control. It deliberately overlaps the fill beneath it, and it is left out of the area figures.",
+      ], p: [
+        "The percentages and the km² counters are arithmetic on those shapes, and inherit every limitation of them.",
+      ] },
+      { h: "How a claim is checked", p: [
+        "Since 31 August 2026, a change that moves the front cannot be saved without a source. Drawing a new area, filling one, and changing which side holds a region all refuse to commit until a citation is given — and that citation is what appears under the event in the timeline.",
+        "Two things are exempt, both because they publish nothing at all: areas marked as excluded from the timeline, and pure geometry repairs — trimming a new area out of what was underneath it, closing a hairline gap between two areas of the same side, merging two shapes into one.",
+        "The rule is not retroactive, and no citation has been invented to fill a gap. Most changes from the map’s first days, 4 to 6 August 2026, carry no source, and their cards are shown with none.",
+        "Only ordinary web links are ever made clickable.",
+      ] },
+      { h: "How mistakes are fixed", ul: [
+        "A wrong shape is redrawn. That publishes a new change dated the day of the correction: the timeline is a log of what was published when, not a rewritten record of what was true.",
+        "An event that should never have been published is deleted outright, on every date it appears.",
+        "A missing or wrong source is written onto the existing entry, without publishing a new event.",
+      ], p: [
+        "Everything reaches this page on the next save. There is no autosave and no schedule, so a correction is live within minutes of being made — and not before.",
+      ] },
+    ],
+  },
+  ru: {
+    title: "Как сделана эта карта",
+    lede: "Источники, проверка, исправления.",
+    close: "Закрыть",
+    contactHead: "Куда писать",
+    contactNone: "Публичный адрес для сообщений об ошибках пока не заведён. Когда он появится, он будет опубликован здесь.",
+    contactWith: function (c) { return "Исправления и вопросы: " + c; },
+    sections: [
+      { h: "Откуда берутся данные", p: [
+        "Каждая область на этой карте нарисована вручную по открытым источникам — публичным постам в Telegram и X и опубликованным материалам. Ни спутниковых данных, ни государственных источников здесь нет. Ничего не публикуется само: каждая фигура существует потому, что человек прочитал источник и нарисовал её.",
+        "Это не результат съёмки. Подвижный фронт обычно описывают как «такой-то населённый пункт, примерно в такие-то дни», а не как линию с точностью до метра. Поэтому фигуры стоит читать как утверждение о том, кто удерживает какие населённые пункты и подступы к ним, а не как обведённую границу.",
+      ] },
+      { h: "Что означают цвета", ul: [
+        "<b>Сплошная красная или синяя заливка</b> — территория, которую, по сообщениям, удерживает эта сторона.",
+        "<b>Двухцветная штриховка</b> — спорная земля: ни одна из сторон не удерживает её уверенно.",
+        "<b>Одноцветная штриховка</b> — утверждение о боях или наступлении, а не о контроле. Она намеренно перекрывает заливку под собой и не входит в подсчёт площадей.",
+      ], p: [
+        "Проценты и счётчики км² — это арифметика по этим фигурам, со всеми их ограничениями.",
+      ] },
+      { h: "Как проверяется утверждение", p: [
+        "С 31 августа 2026 года изменение, сдвигающее линию фронта, невозможно сохранить без источника. Создание новой области, заливка и смена стороны, удерживающей регион, не дают подтвердить правку, пока источник не указан, — и именно он показывается под событием в ленте.",
+        "Исключений ровно два, и оба по одной причине: они вообще ничего не публикуют. Это области, помеченные как исключённые из ленты, и чисто геометрические исправления — обрезка новой области по тому, что было под ней, устранение волосяного зазора между двумя областями одной стороны, слияние двух фигур в одну.",
+        "Правило не имеет обратной силы, и ни один источник не был придуман задним числом. У большинства изменений первых дней карты, с 4 по 6 августа 2026 года, источника нет, и их карточки показываются без него.",
+        "Кликабельными становятся только обычные веб-ссылки.",
+      ] },
+      { h: "Как исправляются ошибки", ul: [
+        "Неверная фигура перерисовывается. Это публикует новое изменение, датированное днём исправления: лента — журнал того, что и когда было опубликовано, а не переписанная запись о том, как было на самом деле.",
+        "Событие, которое не следовало публиковать, удаляется целиком — на всех датах, где оно есть.",
+        "Отсутствующий или неверный источник вписывается в уже существующую запись, не порождая нового события.",
+      ], p: [
+        "Всё попадает на эту страницу при следующем сохранении. Автосохранения и расписания нет, поэтому исправление появляется здесь через минуты после того, как сделано, — и не раньше.",
+      ] },
+    ],
+  },
+};
+
+function methodologyContactHtml(m) {
+  if (!METHODOLOGY_CONTACT) return m.contactNone;
+  // Goes through the same two gates a published citation does (§3.4): only http(s) ever
+  // reaches an href, and the visible text is escaped either way.
+  var href = safeHttpUrl(METHODOLOGY_CONTACT);
+  var shown = esc(METHODOLOGY_CONTACT);
+  return m.contactWith(href
+    ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + shown + '</a>'
+    : shown);
+}
+
+function renderMethodology() {
+  var m = METHODOLOGY[currentLang];
+  var h = '<h2 id="methodology-title">' + m.title + '</h2>'
+        + '<div class="lede">' + m.lede + '</div>';
+  m.sections.forEach(function (sec) {
+    h += '<h3>' + sec.h + '</h3>';
+    if (sec.ul) h += '<ul>' + sec.ul.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>';
+    (sec.p || []).forEach(function (x) { h += '<p>' + x + '</p>'; });
+  });
+  h += '<h3>' + m.contactHead + '</h3><p>' + methodologyContactHtml(m) + '</p>';
+  h += '<div class="close-row"><button class="tool" id="methodology-close">' + m.close + '</button></div>';
+  document.getElementById('methodology').innerHTML = h;
+  document.getElementById('methodology-close').onclick = function () { setMethodologyOpen(false); };
+}
+
+// The hash is what makes the methodology a thing you can send someone, which is most of the
+// point of having one (§7.3): a reader asked to check the method should be able to be given a
+// link to it, not told which button to press. Nothing else in this file reads location.hash.
+// Closing uses replaceState rather than clearing the hash outright, so Back leaves the map
+// rather than reopening the panel the reader just dismissed.
+function setMethodologyOpen(open) {
+  if (open) renderMethodology();
+  document.getElementById('methodology-overlay').classList.toggle('open', open);
+  if (open) {
+    if (location.hash !== '#methodology') history.replaceState(null, '', '#methodology');
+  } else if (location.hash === '#methodology') {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
+function methodologyIsOpen() {
+  return document.getElementById('methodology-overlay').classList.contains('open');
+}
 
 // Fixed, closed set of Ukraine's administrative regions — safe to hardcode rather than
 // plumb through the data pipeline. Keyed on the exact Ukrainian spelling territory_stats.json
@@ -1888,6 +2058,7 @@ map.on('click', function (e) {
   measureRedraw();
 });
 document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && methodologyIsOpen()) { setMethodologyOpen(false); return; }
   if (!measureActive) return;
   if (e.key === 'Escape') { measurePoints = []; measureRedraw(); setMeasureActive(false); }
   else if (e.key === 'Enter') { setMeasureActive(false); }
@@ -1904,6 +2075,13 @@ function renderStaticChrome() {
   var measureBtn = document.getElementById('tool-measure');
   measureBtn.textContent = t('measure');
   measureBtn.title = t('measureTitle');
+  var methBtn = document.getElementById('tool-methodology');
+  methBtn.textContent = t('methodology');
+  methBtn.title = t('methodologyTitle');
+  // Re-render rather than merely relabel: the panel's prose is a whole document, and leaving
+  // it in the previous language behind a translated button is the one place this page could
+  // show two languages at once.
+  if (methodologyIsOpen()) renderMethodology();
   var langBtn = document.getElementById('tool-lang');
   langBtn.textContent = currentLang === 'en' ? 'RU' : 'EN';
   langBtn.title = t('langToggleTitle');
@@ -1937,7 +2115,23 @@ function setLanguage(lang) {
 document.getElementById('tool-lang').addEventListener('click', function () {
   setLanguage(currentLang === 'en' ? 'ru' : 'en');
 });
+document.getElementById('tool-methodology').addEventListener('click', function () {
+  setMethodologyOpen(!methodologyIsOpen());
+});
+// Click the backdrop to dismiss — the panel itself is a child, so a click inside it stops
+// here on the target check rather than needing stopPropagation on every element in the prose.
+document.getElementById('methodology-overlay').addEventListener('click', function (e) {
+  if (e.target === this) setMethodologyOpen(false);
+});
 renderStaticChrome();
+// Deep link: /#methodology opens straight into the panel, so the methodology can be sent as
+// a link. After renderStaticChrome() because the panel renders from the resolved language.
+// The hashchange half covers the same link arriving at a reader who already has the map
+// open, where the browser changes the hash without reloading and the load-time check above
+// never runs again.
+function syncMethodologyToHash() { setMethodologyOpen(location.hash === '#methodology'); }
+window.addEventListener('hashchange', syncMethodologyToHash);
+syncMethodologyToHash();
 report();
 
 refresh();
