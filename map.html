@@ -187,9 +187,24 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   <span id="count"></span>
 </div>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+<!-- Pinned by version AND by hash. Each sha384 below was computed from the exact URL beside
+     it; the browser refuses the file if the CDN ever serves different bytes. A version bump
+     is a TWO-PART change — new URL and freshly computed hash. Stage 21 vendors these three
+     files into the published tree and drops the CDN from the reader's path; these are the
+     hashes it checks the vendored bytes against, so keep them in step with the copies.
+       https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css
+         sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb
+       https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js
+         sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO
+       https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js
+         sha384-82q0nm29xZzIo5BMtDYnh2/NxeO6FoaK1S/0nF84w3cEsqbBfun3JdMyDVYWfVY5
+-->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+      integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+        integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"
+        integrity="sha384-82q0nm29xZzIo5BMtDYnh2/NxeO6FoaK1S/0nF84w3cEsqbBfun3JdMyDVYWfVY5" crossorigin="anonymous"></script>
 <!-- Local, and shared verbatim with editor.html. It fetches settlement_index.json
      lazily on the first focus of the search field, so the opening view still costs
      what it did before this feature existed. -->
