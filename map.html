@@ -11,7 +11,12 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 #toolbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 9px 14px; background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
-  z-index: 1000; flex-shrink: 0;
+  /* Above Leaflet's own controls, which sit at 1000. This used to tie with them, and #map-wrap
+     is positioned with z-index:auto so it opens no stacking context of its own — the controls
+     compete here directly and, coming later in the DOM, won. Nothing showed it until something
+     in the toolbar hung down over the map: at a phone width the basemap switcher painted over
+     the measure menu. The search dropdown has the same shape and the same fix. */
+  z-index: 1100; flex-shrink: 0;
 }
 #toolbar h1 { font-size: 13px; font-weight: 600; color: #bbb; letter-spacing: .06em; }
 .tool {
@@ -21,6 +26,36 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 .tool:hover { background: #2e2e2e; }
 .tool.active { background: #1d4ed8; border-color: #2563eb; color: #fff; }
 #map.measuring { cursor: crosshair; }
+
+/* Measure tool. The button is a menu trigger, so the panel is positioned against a
+   wrapper rather than the toolbar — the toolbar wraps at narrow widths and an
+   absolutely-positioned panel anchored to the bar itself would part company with its
+   button on the second row. */
+#measure-wrap { position: relative; display: inline-flex; }
+#measure-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 1200; min-width: 244px;
+  background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
+  padding: 9px 12px 8px; box-shadow: 0 6px 24px rgba(0,0,0,.6); display: none;
+}
+#measure-menu.open { display: block; }
+#measure-menu .mm-title { font-size: 12.5px; font-weight: 600; color: #eee; margin-bottom: 5px; }
+#measure-menu .mm-hint { font-size: 11px; line-height: 1.45; color: #888; margin-bottom: 5px; }
+#measure-menu .mm-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  padding: 3px 0; font: 12px 'Segoe UI', system-ui, sans-serif; color: #60a5fa; cursor: pointer;
+}
+#measure-menu .mm-item:hover:not(:disabled) { color: #93c5fd; text-decoration: underline; }
+/* Greyed rather than hidden: Finish is the item that ends the operation, and a control that
+   appears only once the drawing is long enough reads as the menu having changed shape. */
+#measure-menu .mm-item:disabled { color: #4a4a4a; cursor: default; }
+#measure-menu .mm-danger { color: #d98080; }
+#measure-menu .mm-danger:hover { color: #f0a0a0; }
+/* Armed “delete all”: the second click is the destructive one, so the row stops looking like
+   the rest of the menu while it is waiting for it. */
+#measure-menu .mm-armed { color: #fff; background: #7f1d1d; border-radius: 5px; padding: 5px 8px; margin: 2px -8px; }
+#measure-menu .mm-armed:hover { color: #fff; background: #991b1b; }
+#measure-menu .mm-sep { border-top: 1px solid #2a2a2a; margin: 6px -12px 4px; }
+
 #measure-readout {
   position: absolute; right: 12px; bottom: 12px; z-index: 900;
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
@@ -28,7 +63,58 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   box-shadow: 0 6px 24px rgba(0,0,0,.6);
 }
 #measure-readout .val { color: #fff; font-weight: 600; }
-#measure-readout .hint { font-size: 10.5px; color: #888; margin-top: 4px; }
+#measure-readout .hint { font-size: 10.5px; color: #888; margin-top: 4px; max-width: 260px; line-height: 1.45; }
+
+/* The page's <style> block sits ABOVE Leaflet's stylesheet in <head>, so the generic dark
+   .leaflet-popup-content-wrapper rule further up loses the cascade to Leaflet's own white one
+   on equal specificity — which is why the !important on .leaflet-bar exists too. Scoping to
+   the popup's own className (L.popup({className}) puts it on .leaflet-popup) outranks Leaflet
+   without an !important and without restyling any popup but this one. */
+.leaflet-popup.measure-popup-skin .leaflet-popup-content-wrapper {
+  background: #1e1e1e; color: #eee; border: 1px solid #333;
+}
+.leaflet-popup.measure-popup-skin .leaflet-popup-tip { background: #1e1e1e; border: none; }
+
+.measure-popup { font-family: 'Segoe UI', sans-serif; min-width: 190px; }
+.measure-popup h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #eee; }
+.measure-popup .mv { font-size: 12px; color: #ddd; margin: 2px 0; }
+.measure-popup .val { color: #fff; font-weight: 600; }
+.measure-popup .mp-actions { margin-top: 8px; border-top: 1px solid #2a2a2a; padding-top: 6px; }
+.measure-popup .mp-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  padding: 2px 0; font: 12px 'Segoe UI', system-ui, sans-serif; color: #60a5fa; cursor: pointer;
+}
+.measure-popup .mp-item:hover { color: #93c5fd; text-decoration: underline; }
+.measure-popup .mp-danger { color: #d98080; }
+.measure-popup .mp-danger:hover { color: #f0a0a0; }
+
+/* Vertex handles on a finished measurement. The icon box is 18px so a fingertip has something
+   to catch; the dot drawn inside it is the same 8px mark the drawing-in-progress uses, so
+   nothing looks bigger than it did — only the target is. */
+.measure-handle { cursor: grab; }
+.measure-handle:active { cursor: grabbing; }
+.measure-handle::after {
+  content: ''; position: absolute; left: 5px; top: 5px; width: 8px; height: 8px;
+  box-sizing: border-box; border-radius: 50%; background: #22c55e; border: 1px solid #fff;
+}
+
+/* Touch. Nothing here changes behaviour — the tool is driven by taps either way — it makes
+   the targets thumb-sized and drops the one piece of copy that is a lie on a phone. */
+@media (pointer: coarse) {
+  #measure-menu { min-width: 260px; }
+  #measure-menu .mm-item, .measure-popup .mp-item { padding: 9px 0; font-size: 13px; }
+  #measure-menu .mm-armed { padding: 9px 8px; }
+  #measure-readout .hint { display: none; }
+  .measure-handle::after { left: 4px; top: 4px; width: 10px; height: 10px; }
+}
+
+/* The length of the segment being dragged out, at the cursor. Not a Leaflet tooltip skin —
+   .leaflet-tooltip is themed light by default and this is a dark page. */
+.leaflet-tooltip.measure-tip {
+  background: #1b1b1b; border: 1px solid #3a3a3a; color: #eee;
+  font: 11px 'Segoe UI', system-ui, sans-serif; padding: 3px 7px; box-shadow: none;
+}
+.leaflet-tooltip.measure-tip::before { display: none; }
 
 #stats-widget {
   /* Bottom-anchored, not top: growing content pushes the top edge up instead of
@@ -190,7 +276,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 
 <div id="toolbar">
   <h1 id="app-title">⚔ CONFLICT MAP</h1>
-  <button class="tool" id="tool-measure" title="Draw a polygon to measure its area and perimeter">📐 Measure</button>
+  <span id="measure-wrap">
+    <button class="tool" id="tool-measure" aria-haspopup="true" aria-expanded="false"
+            title="Measure a distance or an area on the map">📐 Measure</button>
+    <div id="measure-menu" role="menu"></div>
+  </span>
   <span id="search-slot"></span>
   <button class="tool" id="tool-lang" title="Switch language">RU</button>
   <button class="tool" id="tool-methodology" title="How this map is made" style="display:none">&#9432; Methodology</button>
@@ -299,7 +389,13 @@ function pluralRu(n, one, few, many) {
 var STRINGS = {
   en: {
     measure: '📐 Measure',
-    measureTitle: 'Draw a polygon to measure its area and perimeter',
+    measureTitle: 'Measure a distance or an area on the map',
+    measureMenuTitle: 'Distance and area measurement',
+    measureStart: 'Start measuring',
+    measureFinish: 'Finish measuring',
+    measureCancel: 'Cancel',
+    measureClearAll: function (n) { return 'Delete all measurements (' + n + ')'; },
+    measureClearAllConfirm: function (n) { return 'Delete all ' + n + ' — click again to confirm'; },
     methodology: 'ⓘ Methodology',
     methodologyTitle: 'Where the data comes from, how a claim is checked, how errors are corrected',
     langToggleTitle: 'Switch to Russian',
@@ -325,9 +421,20 @@ var STRINGS = {
     showingNearest: function (shown, asked) {
       return 'Showing frontline as of end of ' + shown + ' — the last record on or before ' + asked;
     },
-    measureArea: function (a) { return 'Area: <span class="val">' + a + ' km²</span>'; },
-    measurePerimeter: function (p) { return 'Perimeter: <span class="val">' + p + ' km</span>'; },
-    measureHint: 'Click to add a point · Enter to finish · Esc to cancel',
+    // Values arrive pre-formatted by formatAreaM2()/formatLengthM(), which is where the unit
+    // is attached — the sentence takes whatever they hand it.
+    measureArea: function (v) { return 'Area: <span class="val">' + v + '</span>'; },
+    measurePerimeter: function (v) { return 'Perimeter: <span class="val">' + v + '</span>'; },
+    measureLength: function (v) { return 'Length: <span class="val">' + v + '</span>'; },
+    measureHint: 'Click to add a point · Finish on the first point, by double-click, or with Enter · Backspace to undo · Esc to cancel',
+    measurePromptFirst: 'Add a point on the map to begin measuring',
+    measurePromptSecond: 'Add a second point to measure the distance',
+    measurePromptThird: 'Add a third point to measure an area',
+    measurePromptMore: 'Keep adding points, or click the first point to close the shape',
+    measurePopupArea: 'Area measurement',
+    measurePopupLine: 'Distance measurement',
+    measureDelete: 'Delete',
+    units: { km: 'km', km2: 'km²' },
     // Events-scroller counter: "<side> +N km²", always a gain, never a loss — see
     // eventGainLabel(). factionNames is a DISPLAY table only; FACTIONS above stays the single
     // canonical source of faction ids, colours and names shared with the other three tools
@@ -342,7 +449,13 @@ var STRINGS = {
   },
   ru: {
     measure: '📐 Измерить',
-    measureTitle: 'Нарисуйте полигон, чтобы измерить площадь и периметр',
+    measureTitle: 'Измерение расстояний и площадей на карте',
+    measureMenuTitle: 'Измерение расстояний и площади',
+    measureStart: 'Начать измерение',
+    measureFinish: 'Закончить измерение',
+    measureCancel: 'Отменить',
+    measureClearAll: function (n) { return 'Удалить все измерения (' + n + ')'; },
+    measureClearAllConfirm: function (n) { return 'Удалить все (' + n + ') — нажмите ещё раз'; },
     methodology: 'ⓘ Методика',
     methodologyTitle: 'Откуда берутся данные, как проверяется утверждение, как исправляются ошибки',
     langToggleTitle: 'Switch to English',
@@ -364,9 +477,18 @@ var STRINGS = {
     showingNearest: function (shown, asked) {
       return 'Линия фронта на конец ' + shown + ' — последняя запись на ' + asked + ' или раньше';
     },
-    measureArea: function (a) { return 'Площадь: <span class="val">' + a + ' км²</span>'; },
-    measurePerimeter: function (p) { return 'Периметр: <span class="val">' + p + ' км</span>'; },
-    measureHint: 'Клик — добавить точку · Enter — завершить · Esc — отмена',
+    measureArea: function (v) { return 'Площадь: <span class="val">' + v + '</span>'; },
+    measurePerimeter: function (v) { return 'Периметр: <span class="val">' + v + '</span>'; },
+    measureLength: function (v) { return 'Длина: <span class="val">' + v + '</span>'; },
+    measureHint: 'Клик — точка · Завершить: клик по первой точке, двойной клик или Enter · Backspace — убрать точку · Esc — отмена',
+    measurePromptFirst: 'Для начала измерения добавьте точку на карту',
+    measurePromptSecond: 'Добавьте вторую точку, чтобы измерить расстояние',
+    measurePromptThird: 'Добавьте третью точку, чтобы измерить площадь',
+    measurePromptMore: 'Добавляйте точки или кликните по первой точке, чтобы замкнуть контур',
+    measurePopupArea: 'Измерение области',
+    measurePopupLine: 'Измерение расстояния',
+    measureDelete: 'Удалить',
+    units: { km: 'км', km2: 'км²' },
     factionNames: { ukraine: 'Украина', russia: 'Россия', contested: 'Спорная', neutral: 'Нейтральная' },
     gainLabel: function (side, v) { return side + ' +' + v + ' км²'; },
     unnamed: 'Без названия',
@@ -2268,17 +2390,41 @@ document.getElementById('history-live').addEventListener('click', showLive);
 
 function refresh() { loadFillTiles(); loadStats(); loadHistory(); }
 
-// ── Measure tool: draw a polygon, report area (km²) and perimeter (km) ─────────────
+// ── Measure tool: a menu-driven ruler for distances and areas ──────────────────────
 // A public-viewer aid, not territory data — its own pane with a dashed outline, so it
 // isn't subject to the opaque-shared-canvas rule (CONVENTIONS §10), which only governs
-// tools that draw territory.
+// tools that draw territory. Same reason a finished measurement carries a popup while the
+// fills deliberately do not (ARCHITECTURE.md §3.5): the reader drew it, so the popup says
+// something about their own drawing, never about published territory.
+//
+// The operation is explicit at both ends — Start arms the map, Finish or Cancel disarms it —
+// and nothing else in the page places a point. That is what the menu is for: the toggle
+// button it replaces armed the map for as long as it was lit, so a reader who pressed it and
+// then went back to reading the map dropped a vertex on their next click.
 map.createPane('measure');
 map.getPane('measure').style.zIndex = 650;
 
-var measureActive = false;
-var measurePoints = [];   // [lat, lng] vertices, in click order
-var measureShape  = null; // L.Polygon (>=3 points) or L.Polyline preview
-var measureDots   = [];   // small vertex markers
+var MEASURE_KEY = 'cv_measurements';
+var MEASURE_COLOR = '#22c55e';
+var MEASURE_DEDUPE_PX = 6;   // a click this close to the last vertex is the second half of a
+                             // double-click, not a vertex anybody wanted
+var MEASURE_CLOSE_PX = 14;   // and this close to the FIRST vertex is "close the shape". Sized
+                             // for a fingertip, since on a touch screen this is the only way
+                             // to finish without going back to the menu
+
+// 'off' — map clicks do nothing at all. Both Finish and Cancel return here, and only Start
+// leaves it.
+var measureMode = 'off';
+var measurePoints = [];       // [lat, lng] vertices of the drawing in progress, in click order
+var measureDraft = null;      // L.LayerGroup holding that drawing
+var measureRubber = null;     // dashed line from the last vertex to the cursor
+var measureRubberTip = null;  // its length, floating at the cursor
+var measureSaved = [];        // [{ id, points }] — finished measurements, oldest first
+var measureShapes = {};       // id -> the L.LayerGroup drawing it
+var measurePopup = null;      // the open L.popup, so a language switch can re-render it
+var measurePopupId = null;
+var measureMenuOpen = false;
+var measureClearArmed = false;  // "delete all" is one click from wiping the lot, so it takes two
 
 // ringAreaM2() is shared/geometry.mjs, imported at the top of this script — the same
 // spherical geodesic formula the editor measures territory with.
@@ -2289,70 +2435,455 @@ function haversineM(a, b) {   // a, b: [lat, lng]
         + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 2 * R * Math.asin(Math.sqrt(s));
 }
+// close: add the closing edge back to the first vertex. Only ever true for 3+ points — with
+// two, the shape is a line and its "perimeter" would be the distance counted twice.
+function measurePathM(pts, close) {
+  var total = 0;
+  for (var i = 0; i < pts.length - 1; i++) total += haversineM(pts[i], pts[i + 1]);
+  if (close && pts.length > 2) total += haversineM(pts[pts.length - 1], pts[0]);
+  return total;
+}
+function measureAreaM2(pts) {
+  if (pts.length < 3) return 0;
+  return ringAreaM2(pts.map(function (p) { return [p[1], p[0]]; })); // wants [lng, lat]
+}
 
-function measureRedraw() {
-  if (measureShape) { map.removeLayer(measureShape); measureShape = null; }
-  measureDots.forEach(function (d) { map.removeLayer(d); });
-  measureDots = [];
+// Grouped in the reader's language (RU groups with spaces, EN with commas) — a seven-digit
+// square-metre count is unreadable otherwise, and that is the headline figure.
+function measureNum(v, dp) {
+  return v.toLocaleString(currentLang === 'ru' ? 'ru-RU' : 'en-US',
+    { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+// km² and km throughout, two decimals, whatever the size. Operator decision (2026-09-01):
+// this is the vocabulary the rest of the page already speaks — the stats panel, the events
+// cards and territory_stats.json are all km² — and a measurement in hectares beside them is a
+// second unit the reader has to convert before they can compare. The cost is real and accepted:
+// two decimals of km² bottoms out at a hectare, so anything smaller reads 0.00.
+function formatLengthM(m) { return measureNum(m / 1000, 2) + ' ' + t('units').km; }
+function formatAreaM2(a) { return measureNum(a / 1e6, 2) + ' ' + t('units').km2; }
 
-  measurePoints.forEach(function (pt) {
-    measureDots.push(L.circleMarker(pt, {
-      pane: 'measure', radius: 3, color: '#fff', weight: 1, fillColor: '#22c55e', fillOpacity: 1,
-    }).addTo(map));
+// ── Drawing ───────────────────────────────────────────────────────────────────────
+function measureShapeStyle(closed, draft) {
+  return {
+    pane: 'measure', color: MEASURE_COLOR, weight: 2,
+    dashArray: draft ? '6,5' : null,
+    fillColor: MEASURE_COLOR, fillOpacity: closed ? 0.12 : 0,
+  };
+}
+// interactive:false throughout: a vertex sitting under the next click must not swallow it,
+// and neither must the fill of the polygon being drawn. `big` grows the first vertex once
+// there is enough shape to close onto — the only thing on screen advertising that clicking it
+// finishes the measurement.
+function measureVertex(pt, big) {
+  return L.circleMarker(pt, {
+    pane: 'measure', radius: big ? 6 : 3, color: '#fff', weight: big ? 2 : 1,
+    fillColor: MEASURE_COLOR, fillOpacity: 1, interactive: false,
+  });
+}
+
+function clearRubber() {
+  if (measureRubber) { map.removeLayer(measureRubber); measureRubber = null; }
+  if (measureRubberTip) { map.removeLayer(measureRubberTip); measureRubberTip = null; }
+}
+function clearDraft() {
+  if (measureDraft) { map.removeLayer(measureDraft); measureDraft = null; }
+  clearRubber();
+}
+
+function redrawDraft() {
+  if (measureDraft) { map.removeLayer(measureDraft); measureDraft = null; }
+  if (measurePoints.length) {
+    var layers = measurePoints.map(function (pt, i) {
+      return measureVertex(pt, i === 0 && measurePoints.length > 2);
+    });
+    if (measurePoints.length > 1) {
+      var closed = measurePoints.length > 2;
+      var opts = measureShapeStyle(closed, true);
+      opts.interactive = false;
+      layers.unshift(closed ? L.polygon(measurePoints, opts) : L.polyline(measurePoints, opts));
+    }
+    measureDraft = L.layerGroup(layers).addTo(map);
+  }
+  renderMeasureReadout();
+  renderMeasureMenu();
+}
+
+function addMeasurePoint(latlng) {
+  var at = map.latLngToLayerPoint(latlng);
+  // Clicking the first vertex closes the shape, the way every polygon tool does it. It needs
+  // three points to close ONTO: with two, a click near the first vertex is just a third point
+  // that happens to land there, and treating it as "close" would finish a shape the reader was
+  // still drawing.
+  if (measurePoints.length > 2
+      && map.latLngToLayerPoint(L.latLng(measurePoints[0])).distanceTo(at) < MEASURE_CLOSE_PX) {
+    finishMeasuring();
+    return;
+  }
+  if (measurePoints.length) {
+    var last = map.latLngToLayerPoint(L.latLng(measurePoints[measurePoints.length - 1]));
+    if (last.distanceTo(at) < MEASURE_DEDUPE_PX) return;
+  }
+  measurePoints.push([latlng.lat, latlng.lng]);
+  // Dropped rather than left hanging from the vertex just placed. A touch browser fires a
+  // synthetic mousemove at the tap point, so without this a tap leaves a zero-length band and
+  // a "0.00 km" label sitting on the map until the next one. On a mouse the next mousemove
+  // puts it straight back.
+  clearRubber();
+  redrawDraft();
+}
+function undoMeasurePoint() {
+  if (!measurePoints.length) return;
+  measurePoints.pop();
+  clearRubber();
+  redrawDraft();
+}
+
+// ── The three menu operations ─────────────────────────────────────────────────────
+function startMeasuring() {
+  measurePoints = [];
+  measureMode = 'drawing';
+  document.getElementById('map').classList.add('measuring');
+  // Otherwise the double-click that finishes a drawing also zooms the map in a level.
+  map.doubleClickZoom.disable();
+  setMeasureHandlesDraggable(false);
+  setMeasureMenuOpen(true);
+  redrawDraft();
+}
+function stopMeasuring() {
+  measureMode = 'off';
+  measurePoints = [];
+  document.getElementById('map').classList.remove('measuring');
+  map.doubleClickZoom.enable();
+  setMeasureHandlesDraggable(true);
+  clearDraft();
+  renderMeasureReadout();
+  renderMeasureMenu();
+  syncMeasureButton();
+}
+function cancelMeasuring() {
+  stopMeasuring();
+  setMeasureMenuOpen(false);
+}
+function finishMeasuring() {
+  if (measurePoints.length < 2) return;   // nothing to finalise — Finish is disabled here too
+  var m = {
+    id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    points: measurePoints.slice(),
+  };
+  measureSaved.push(m);
+  persistMeasurements();
+  drawMeasurement(m);
+  stopMeasuring();
+  setMeasureMenuOpen(false);
+  // The numbers were in the readout a moment ago and the readout is now gone, so the popup
+  // opens itself — otherwise finishing a measurement makes its result disappear.
+  openMeasurePopup(m);
+}
+
+// ── Finished measurements ─────────────────────────────────────────────────────────
+function drawMeasurement(m) {
+  var closed = m.points.length > 2;
+  var layers = [closed
+    ? L.polygon(m.points, measureShapeStyle(true, false))
+    : L.polyline(m.points, measureShapeStyle(false, false))];
+  // A 2px line is a miserable click target and the delete menu is behind it, so an invisible
+  // fat line rides under the visible one. A polygon needs none — its fill is the target.
+  if (!closed) {
+    layers.push(L.polyline(m.points, {
+      pane: 'measure', color: MEASURE_COLOR, weight: 14, opacity: 0, fill: false,
+    }));
+  }
+  var shape = layers[0], hit = closed ? null : layers[1];
+  // Handles are L.Marker, not the L.circleMarker a drawing in progress uses: circleMarkers are
+  // SVG paths and Leaflet's drag handling only exists on markers. Measured before keeping them
+  // — see ARCHITECTURE.md §3.5 for the numbers; the short version is that they cost nothing
+  // because the territory fills are canvas and a handle moving never touches them.
+  m.points.forEach(function (pt, i) {
+    var h = L.marker(pt, {
+      pane: 'measure', keyboard: false, draggable: measureMode !== 'drawing',
+      icon: L.divIcon({ className: 'measure-handle', iconSize: [18, 18], iconAnchor: [9, 9] }),
+    });
+    h.on('drag', function () {
+      var ll = h.getLatLng();
+      m.points[i] = [ll.lat, ll.lng];
+      shape.setLatLngs(m.points);
+      if (hit) hit.setLatLngs(m.points);
+    });
+    h.on('dragend', function () {
+      persistMeasurements();
+      // The popup, if this measurement's is open, is showing the numbers for where the vertex
+      // used to be.
+      if (measurePopupId === m.id && measurePopup) measurePopup.setContent(measurePopupNode(m));
+    });
+    layers.push(h);
   });
 
-  if (measurePoints.length > 1) {
-    var opts = {
-      pane: 'measure', color: '#22c55e', weight: 2, dashArray: '6,5',
-      fillColor: '#22c55e', fillOpacity: measurePoints.length > 2 ? 0.12 : 0,
-    };
-    measureShape = measurePoints.length > 2
-      ? L.polygon(measurePoints, opts).addTo(map)
-      : L.polyline(measurePoints, opts).addTo(map);
-  }
-  updateMeasureReadout();
+  // featureGroup, not layerGroup: a plain LayerGroup does not re-fire its children's events,
+  // so the click handler below would never run and the delete menu would be unreachable.
+  var grp = L.featureGroup(layers).addTo(map);
+  grp.on('click', function (e) {
+    L.DomEvent.stopPropagation(e);   // the map's own click handler must not also see this
+    // While a new measurement is being drawn an old one is scenery: a click on it is a click
+    // on the map at that point, not a request to open its menu.
+    if (measureMode === 'drawing') { addMeasurePoint(e.latlng); return; }
+    openMeasurePopup(m, e.latlng);
+  });
+  measureShapes[m.id] = grp;
 }
 
-function updateMeasureReadout() {
+// A handle is a click target, and while a new measurement is being drawn every click belongs
+// to that drawing. Dragging off means an old vertex cannot be picked up by accident; the group
+// click handler still routes the click through to addMeasurePoint().
+function setMeasureHandlesDraggable(on) {
+  Object.keys(measureShapes).forEach(function (id) {
+    measureShapes[id].eachLayer(function (l) {
+      if (l.dragging) { if (on) l.dragging.enable(); else l.dragging.disable(); }
+    });
+  });
+}
+
+function measureBounds(m) {
+  return L.latLngBounds(m.points.map(function (p) { return L.latLng(p); }));
+}
+
+// Built as a node rather than an HTML string so the two actions can carry real listeners.
+// Nothing here is spliced from published data; rebuilding it on every open is also what
+// makes it pick up a language switch.
+function measurePopupNode(m) {
+  var closed = m.points.length > 2;
+  var el = document.createElement('div');
+  el.className = 'measure-popup';
+  el.innerHTML = '<h3>' + (closed ? t('measurePopupArea') : t('measurePopupLine')) + '</h3>'
+    + (closed ? '<p class="mv">' + t('measureArea')(formatAreaM2(measureAreaM2(m.points))) + '</p>' : '')
+    + '<p class="mv">'
+    + (closed ? t('measurePerimeter')(formatLengthM(measurePathM(m.points, true)))
+              : t('measureLength')(formatLengthM(measurePathM(m.points, false))))
+    + '</p>'
+    + '<div class="mp-actions">'
+    + '<button class="mp-item mp-danger" data-act="delete">' + t('measureDelete') + '</button>'
+    + '</div>';
+  el.querySelector('[data-act="delete"]').addEventListener('click', function () {
+    deleteMeasurement(m.id);
+  });
+  return el;
+}
+function openMeasurePopup(m, latlng) {
+  measurePopupId = m.id;
+  measurePopup = L.popup({ className: 'measure-popup-skin' })
+    .setLatLng(latlng || measureBounds(m).getCenter())
+    .setContent(measurePopupNode(m))
+    .openOn(map);
+}
+function deleteMeasurement(id) {
+  var grp = measureShapes[id];
+  if (grp) { map.removeLayer(grp); delete measureShapes[id]; }
+  measureSaved = measureSaved.filter(function (m) { return m.id !== id; });
+  persistMeasurements();
+  if (measurePopupId === id) map.closePopup();
+  renderMeasureMenu();
+}
+function clearMeasurements() {
+  Object.keys(measureShapes).forEach(function (id) { map.removeLayer(measureShapes[id]); });
+  measureShapes = {};
+  measureSaved = [];
+  measureClearArmed = false;
+  persistMeasurements();
+  map.closePopup();
+  renderMeasureMenu();
+}
+map.on('popupclose', function (e) {
+  if (e.popup === measurePopup) { measurePopup = null; measurePopupId = null; }
+});
+
+// ── Persistence: this browser tab, and no longer ──────────────────────────────────
+// sessionStorage, not localStorage, deliberately. A measurement is a scratch mark on a map
+// somebody is reading, not a saved document: it survives a reload, which is what makes an
+// accidental refresh survivable, and it dies with the tab, which is what a reader expects of
+// a drawing they never saved. Every access is guarded — a browser set to block site data
+// throws on the accessor itself, and the tool is perfectly usable for one page view without
+// it.
+function persistMeasurements() {
+  try { sessionStorage.setItem(MEASURE_KEY, JSON.stringify(measureSaved)); } catch (e) { /* not fatal */ }
+}
+function restoreMeasurements() {
+  var raw = null;
+  try { raw = sessionStorage.getItem(MEASURE_KEY); } catch (e) { return; }
+  if (!raw) return;
+  var parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { return; }
+  if (!Array.isArray(parsed)) return;
+  // Validated rather than trusted: this is storage the reader can edit, and a bad entry
+  // reaching L.polygon throws inside a module script and takes the rest of the page's setup
+  // down with it — the settlement_search.js failure of 2026-08-24 in a different costume.
+  measureSaved = parsed.filter(function (m) {
+    return m && typeof m.id === 'string' && Array.isArray(m.points) && m.points.length >= 2
+      && m.points.every(function (p) {
+        return Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]);
+      });
+  });
+  measureSaved.forEach(drawMeasurement);
+}
+
+// ── The menu ──────────────────────────────────────────────────────────────────────
+function measurePromptText() {
+  if (!measurePoints.length) return t('measurePromptFirst');
+  if (measurePoints.length === 1) return t('measurePromptSecond');
+  if (measurePoints.length === 2) return t('measurePromptThird');
+  return t('measurePromptMore');
+}
+function renderMeasureMenu() {
+  var el = document.getElementById('measure-menu');
+  var drawing = measureMode === 'drawing';
+  var h = '<div class="mm-title">' + t('measureMenuTitle') + '</div>';
+  if (drawing) {
+    h += '<div class="mm-hint">' + measurePromptText() + '</div>'
+      + '<button class="mm-item" data-act="cancel">' + t('measureCancel') + '</button>'
+      + '<button class="mm-item" data-act="finish"'
+      + (measurePoints.length > 1 ? '' : ' disabled') + '>' + t('measureFinish') + '</button>';
+  } else {
+    h += '<button class="mm-item" data-act="start">' + t('measureStart') + '</button>';
+  }
+  if (measureSaved.length) {
+    h += '<div class="mm-sep"></div>'
+      + '<button class="mm-item mm-danger' + (measureClearArmed ? ' mm-armed' : '') + '" data-act="clear">'
+      + (measureClearArmed ? t('measureClearAllConfirm') : t('measureClearAll'))(measureSaved.length)
+      + '</button>';
+  }
+  el.innerHTML = h;
+}
+function setMeasureMenuOpen(on) {
+  measureMenuOpen = on;
+  measureClearArmed = false;   // a menu that closes armed would delete everything on reopening
+  document.getElementById('measure-menu').classList.toggle('open', on);
+  document.getElementById('tool-measure').setAttribute('aria-expanded', on ? 'true' : 'false');
+  if (on) {
+    renderMeasureMenu();
+    // The toolbar wraps on a narrow window, and the button can land close enough to the right
+    // edge that a 244px panel hanging off its left corner runs off screen. Nudged back after
+    // layout rather than pinned by a media query, because what decides it is where the button
+    // ended up, not how wide the window is.
+    var el = document.getElementById('measure-menu');
+    el.style.left = '0px';
+    var over = el.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
+    if (over > 0) el.style.left = (-over) + 'px';
+  }
+  syncMeasureButton();
+}
+// Lit while the menu is open OR while a drawing is in progress — the second is the one that
+// matters, because a reader who closed the menu mid-drawing needs something on screen saying
+// the map is still armed, and pointing at the way back to Cancel.
+function syncMeasureButton() {
+  document.getElementById('tool-measure').classList
+    .toggle('active', measureMenuOpen || measureMode === 'drawing');
+}
+
+document.getElementById('tool-measure').addEventListener('click', function (e) {
+  e.stopPropagation();
+  setMeasureMenuOpen(!measureMenuOpen);
+});
+document.getElementById('measure-menu').addEventListener('click', function (e) {
+  // The menu handles its own clicks; the document listener below must not also see them. Not
+  // tidiness — renderMeasureMenu() rewrites this element's innerHTML, so by the time the click
+  // reaches document its target is detached, `closest('#measure-wrap')` on a detached node is
+  // null, and the menu closes itself as though the click had landed on the map. That is what
+  // made the second click of "delete all" land on a menu that had already disarmed.
+  e.stopPropagation();
+  var btn = e.target.closest('[data-act]');
+  if (!btn || btn.disabled) return;
+  var act = btn.getAttribute('data-act');
+  // Anything else in the menu disarms it — the confirmation belongs to one uninterrupted pair
+  // of clicks on the same row, not to the session.
+  if (act !== 'clear') measureClearArmed = false;
+  if (act === 'start') startMeasuring();
+  else if (act === 'finish') finishMeasuring();
+  else if (act === 'cancel') cancelMeasuring();
+  else if (act === 'clear') {
+    if (measureClearArmed) clearMeasurements();
+    else { measureClearArmed = true; renderMeasureMenu(); }
+  }
+});
+// A click anywhere else puts the menu away — except mid-drawing, where the map is exactly
+// where the reader is clicking and the menu is holding Finish and Cancel.
+document.addEventListener('click', function (e) {
+  if (!measureMenuOpen || measureMode === 'drawing') return;
+  if (!e.target.closest('#measure-wrap')) setMeasureMenuOpen(false);
+});
+
+// ── Live readout ──────────────────────────────────────────────────────────────────
+// Bottom-right, away from the menu: the menu is a control surface at the top of the window,
+// these are numbers about the shape under the cursor. Nothing is shown for a single point —
+// one vertex has no length, and printing a 0 would be a measurement.
+function renderMeasureReadout() {
   var box = document.getElementById('measure-readout');
-  if (!measurePoints.length) { box.style.display = 'none'; return; }
+  if (measureMode !== 'drawing' || measurePoints.length < 2) { box.style.display = 'none'; return; }
   box.style.display = 'block';
-
-  var perimM = 0;
-  for (var i = 0; i < measurePoints.length - 1; i++) perimM += haversineM(measurePoints[i], measurePoints[i + 1]);
-  var areaKm2 = 0;
-  if (measurePoints.length > 2) {
-    perimM += haversineM(measurePoints[measurePoints.length - 1], measurePoints[0]); // closing edge
-    var ring = measurePoints.map(function (p) { return [p[1], p[0]]; }); // ringAreaM2 wants [lng,lat]
-    areaKm2 = ringAreaM2(ring) / 1e6;
-  }
-  box.innerHTML = (measurePoints.length > 2
-      ? t('measureArea')(areaKm2.toFixed(2)) + '<br>' : '')
-    + t('measurePerimeter')((perimM / 1000).toFixed(2))
-    + (measureActive ? '<div class="hint">' + t('measureHint') + '</div>' : '');
+  // Two points are a line and nothing else: no area is computed, let alone shown, until a
+  // third point makes one mean something.
+  var closed = measurePoints.length > 2;
+  box.innerHTML = (closed ? t('measureArea')(formatAreaM2(measureAreaM2(measurePoints))) + '<br>' : '')
+    + (closed ? t('measurePerimeter')(formatLengthM(measurePathM(measurePoints, true)))
+              : t('measureLength')(formatLengthM(measurePathM(measurePoints, false))))
+    + '<div class="hint">' + t('measureHint') + '</div>';
 }
 
-function setMeasureActive(on) {
-  measureActive = on;
-  document.getElementById('tool-measure').classList.toggle('active', on);
-  document.getElementById('map').classList.toggle('measuring', on);
-  if (on) { measurePoints = []; measureRedraw(); }
-  else { updateMeasureReadout(); }
-}
-document.getElementById('tool-measure').addEventListener('click', function () {
-  setMeasureActive(!measureActive);
-});
+// ── Map input ─────────────────────────────────────────────────────────────────────
 map.on('click', function (e) {
-  if (!measureActive) return;
-  measurePoints.push([e.latlng.lat, e.latlng.lng]);
-  measureRedraw();
+  if (measureMode !== 'drawing') return;
+  addMeasurePoint(e.latlng);
 });
+// The rubber band answers "how long is the segment I am about to place", which is most of
+// what a reader is doing with two points and a map.
+map.on('mousemove', function (e) {
+  if (measureMode !== 'drawing' || !measurePoints.length) return;
+  var last = measurePoints[measurePoints.length - 1];
+  var seg = [L.latLng(last), e.latlng];
+  if (!measureRubber) {
+    measureRubber = L.polyline(seg, {
+      pane: 'measure', color: MEASURE_COLOR, weight: 1.5, opacity: 0.7,
+      dashArray: '4,4', interactive: false,
+    }).addTo(map);
+  } else measureRubber.setLatLngs(seg);
+  var txt = formatLengthM(haversineM(last, [e.latlng.lat, e.latlng.lng]));
+  if (!measureRubberTip) {
+    measureRubberTip = L.tooltip({
+      permanent: true, direction: 'right', offset: [12, 0],
+      className: 'measure-tip', interactive: false,
+    }).setLatLng(e.latlng).setContent(txt).addTo(map);
+  } else measureRubberTip.setLatLng(e.latlng).setContent(txt);
+});
+map.on('mouseout', clearRubber);
+// Double-click finishes, the way it does in every other polygon tool. The first of its two
+// clicks is a real vertex; the second lands inside MEASURE_DEDUPE_PX of it and is dropped.
+map.on('dblclick', function (e) {
+  if (measureMode !== 'drawing') return;
+  L.DomEvent.stop(e);
+  finishMeasuring();
+});
+
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && methodologyIsOpen()) { setMethodologyOpen(false); return; }
-  if (!measureActive) return;
-  if (e.key === 'Escape') { measurePoints = []; measureRedraw(); setMeasureActive(false); }
-  else if (e.key === 'Enter') { setMeasureActive(false); }
+  // The search field is one Tab away and takes Enter and Escape of its own; a keystroke
+  // typed into an input is never a measure-tool shortcut.
+  var tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+  if (measureMode !== 'drawing') {
+    if (e.key === 'Escape' && measureMenuOpen) setMeasureMenuOpen(false);
+    return;
+  }
+  if (e.key === 'Escape') cancelMeasuring();
+  else if (e.key === 'Enter') finishMeasuring();
+  // ev.code, not ev.key alone — this map's readers are as likely to be on a Russian layout as
+  // not, and there ev.key for the Z key is `я` (CONVENTIONS §6). ev.key stays as the fallback
+  // because ev.code is positional and AZERTY puts Z at KeyW.
+  else if (e.key === 'Backspace'
+        || ((e.ctrlKey || e.metaKey) && (e.code === 'KeyZ' || e.key.toLowerCase() === 'z'))) {
+    e.preventDefault();
+    undoMeasurePoint();
+  }
 });
+
+restoreMeasurements();
+renderMeasureMenu();
 
 // ── Language toggle ─────────────────────────────────────────────────────────────────
 // Re-renders every bit of UI chrome from t(); anything driven by live data (report(),
@@ -2365,6 +2896,15 @@ function renderStaticChrome() {
   var measureBtn = document.getElementById('tool-measure');
   measureBtn.textContent = t('measure');
   measureBtn.title = t('measureTitle');
+  // The menu and the readout are rebuilt from t() on every render anyway; an open popup is
+  // the one measure surface that would otherwise sit in the old language until it is
+  // reopened, so it is re-rendered in place.
+  renderMeasureMenu();
+  renderMeasureReadout();
+  if (measurePopup && measurePopupId) {
+    var openM = measureSaved.filter(function (m) { return m.id === measurePopupId; })[0];
+    if (openM) measurePopup.setContent(measurePopupNode(openM));
+  }
   var methBtn = document.getElementById('tool-methodology');
   // Labelled even while parked, so flipping METHODOLOGY_ENABLED is genuinely all it takes —
   // a button that comes back unlabelled or in the wrong language is the usual way a parked
@@ -2398,7 +2938,6 @@ function setLanguage(lang) {
   // reader who chose a layer keeps it. buildBasemapControl() reads activeBasemap fresh, which
   // is what preserves the selection across this rebuild.
   rebuildBasemapControl();
-  updateMeasureReadout();
   // Chrome only — the placeholder and the "village/hamlet" labels. Which of
   // name:uk / name:ru / name:en a result is shown under follows from this too,
   // but the names themselves are never translated (CONVENTIONS.md §6).
