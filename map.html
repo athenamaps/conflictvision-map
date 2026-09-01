@@ -265,6 +265,7 @@ import {
   changeGeom, groupSameDayChanges, eventRepresentative, groupDelta, eventGainLabel,
   eventSourceOf,
 } from './shared/history.mjs';
+import { snapshotPath, snapshotIndexPath, snapshotForDate } from './shared/snapshots.mjs';
 
 // Faction ids, colours AND display names must stay identical to listener.py,
 // bootstrap.html and editor.html (CONVENTIONS §5). The editor is the only writer,
@@ -317,6 +318,13 @@ var STRINGS = {
     live: '● Live',
     liveTitle: 'Return to the live, current frontline',
     showingAsOf: function (d) { return 'Showing frontline as of end of ' + d; },
+    // Said when the picked date has no snapshot of its own and the newest one before it is
+    // shown instead. The date the reader sees is the date the state is FROM, because that is
+    // what is on the screen; the date they asked for is the parenthetical. Naming only the
+    // requested date would be the map quietly claiming to know a day it has no record of.
+    showingNearest: function (shown, asked) {
+      return 'Showing frontline as of end of ' + shown + ' — the last record on or before ' + asked;
+    },
     measureArea: function (a) { return 'Area: <span class="val">' + a + ' km²</span>'; },
     measurePerimeter: function (p) { return 'Perimeter: <span class="val">' + p + ' km</span>'; },
     measureHint: 'Click to add a point · Enter to finish · Esc to cancel',
@@ -353,6 +361,9 @@ var STRINGS = {
     live: '● Сейчас',
     liveTitle: 'Вернуться к текущей линии фронта',
     showingAsOf: function (d) { return 'Линия фронта на конец ' + d; },
+    showingNearest: function (shown, asked) {
+      return 'Линия фронта на конец ' + shown + ' — последняя запись на ' + asked + ' или раньше';
+    },
     measureArea: function (a) { return 'Площадь: <span class="val">' + a + ' км²</span>'; },
     measurePerimeter: function (p) { return 'Периметр: <span class="val">' + p + ' км</span>'; },
     measureHint: 'Клик — добавить точку · Enter — завершить · Esc — отмена',
@@ -1023,6 +1034,12 @@ function report() {
   if (errMsgs.length) {
     msgEl.textContent = errMsgs.join(' · ');
     msgEl.className = 'err';
+  } else if (selectedDate) {
+    // The reader is on a past date and this line is telling them WHICH one. report() runs on
+    // the 60 s poll, which is about the live front and has nothing to say about a date that
+    // already finished — overwriting it with "Territory loaded" dropped the only thing on
+    // screen naming the date being shown, a minute after they picked it.
+    return;
   } else {
     msgEl.textContent = stillLoading ? t('loadingTerritory') : t('territoryLoaded');
     msgEl.className = '';
@@ -1644,6 +1661,12 @@ function loadFillTiles() {
       clearFillTiles();
       fillCache.clear();
       fillPending.clear();
+      // A publish is also when a new day's snapshot lands, and the index naming it is
+      // memoised — see ensureSnapshotIndex(). Dropping the memo (and the one cached snapshot,
+      // which a same-day republish rewrites in place) is what stops a session that has been
+      // open since this morning from insisting the newest date does not exist.
+      snapshotIndexPromise = null;
+      snapshotCache = { date: null, fc: null };
     }
     counts.regions = Object.keys(props).length;
     errors.regions = null;
@@ -1891,6 +1914,111 @@ function renderEventsScroller() {
 }
 function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
+// ── Reverse replay: turf helpers ──────────────────────────────────────────────────
+// Bare-geometry wrappers, because everything below works in geometries (that is what the
+// history records carry and what L.geoJSON wants) while turf's boolean ops want Features.
+// Each one swallows its own failure and returns the "changed nothing" answer: one
+// self-intersecting ring somewhere in the retention window must degrade one shape, not throw
+// the whole date away and leave the reader looking at an error message.
+function asFeature(g) { return { type: 'Feature', properties: {}, geometry: g }; }
+function safeDifference(a, b) {
+  if (typeof turf === 'undefined' || !a || !b) return a || null;
+  try { var d = turf.difference(asFeature(a), asFeature(b)); return (d && d.geometry) || null; }
+  catch (e) { return a; }
+}
+function safeUnion(a, b) {
+  if (typeof turf === 'undefined' || !a || !b) return a || b || null;
+  try { var u = turf.union(asFeature(a), asFeature(b)); return (u && u.geometry) || a; }
+  catch (e) { return a; }
+}
+function safeIntersectArea(a, b) {
+  if (typeof turf === 'undefined' || !a || !b) return 0;
+  try { var i = turf.intersect(asFeature(a), asFeature(b)); return i ? turf.area(i) : 0; }
+  catch (e) { return 0; }
+}
+function safeBbox(g) { try { return turf.bbox(g); } catch (e) { return null; } }
+function bboxHit(a, b) {
+  return !!a && !!b && !(a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] < a[1]);
+}
+
+// ── Reverse replay: giving vacated ground back ────────────────────────────────────
+// THE HOLE PROBLEM (reported 2026-09-01, fixed here). Undoing an `add` deletes the polygon,
+// and undoing an `update` shrinks a feature back to its `base_geometry`. Either way ground
+// stops being covered by anything — and on this map that ground is not empty, it belonged to
+// whoever held it before the advance. Left alone the reader gets the live front with this
+// week's pockets punched out of it as unfilled holes, which is not the front line on any
+// date; it is today's map minus the news.
+//
+// The information that would make this exact is not in the file, and that is deliberate
+// upstream: when the operator draws a pocket, editor.html auto-clips the neighbours it
+// overlaps and then REBASES that clip out of the diff (rebaseClippedRegions(), and
+// rebaseMeldedBase() for melds) so the clipped neighbour does not publish a second, mirrored
+// card crediting the wrong side with the same km². The cost, unnoticed until now, is that the
+// clipped neighbour's pre-clip shape is never written down, so the replay has nothing to grow
+// back. Measured against out/history-1.json on 2026-09-01: reconstructing 2026-08-07 left
+// 165 km² of the front uncovered across ~25 holes, every one of them a pocket drawn since,
+// and the replay restored nothing at all — the deleted adds WERE the whole of its output.
+// docs/TODO.md carries the upstream half of this: log the clip as a silent record, so the
+// replay is exact rather than inferred.
+//
+// What this does instead is infer the owner, which is possible because the clip conserves
+// ground: whatever a pocket took, it took from something it touches. Each vacated blob is
+// first reduced to the part nothing else covers — a hole is only a hole if the rest of the
+// replay did not already fill it, and with a complete record it never is, so this whole pass
+// becomes a no-op the moment the upstream half lands — and what is left is handed to the
+// surviving feature it shares the most edge with, approximated by how much of a collar around
+// the hole falls inside that neighbour. Widening collars, because a hole whose only
+// neighbours are other holes has to wait for them to be filled first; biggest blob first, for
+// the same reason.
+//
+// This is an inference, and it is worth being plain about which way it can be wrong: a pocket
+// cut out of two neighbours at once (a Ukrainian wash on one side, a contested strip on the
+// other) is handed whole to whichever it touches more, so the reconstructed line can be a
+// pocket-width off in the detail. What it cannot do is invent ground that was not there, or
+// change what a date's colours say about who was advancing. A hole does both.
+var VACATED_COLLAR_M = [400, 1500, 5000];
+
+function returnVacatedGround(working, vacated) {
+  if (typeof turf === 'undefined' || !vacated.length) return;
+  var live = [];
+  working.forEach(function (f, id) {
+    if (!f || !f.geometry) return;
+    live.push({ id: id, f: f, bbox: safeBbox(f.geometry) });
+  });
+  vacated.sort(function (a, b) { return b.area - a.area; });
+  vacated.forEach(function (v) {
+    var rest = v.geom, rb = safeBbox(rest);
+    for (var i = 0; i < live.length && rest; i++) {
+      if (!bboxHit(rb, live[i].bbox)) continue;
+      rest = safeDifference(rest, live[i].f.geometry);
+    }
+    if (!rest) return;   // the replay already covered it — nothing was actually vacated
+
+    var owner = null;
+    for (var ci = 0; ci < VACATED_COLLAR_M.length && !owner; ci++) {
+      var collar = null;
+      try { collar = turf.buffer(asFeature(rest), VACATED_COLLAR_M[ci], { units: 'meters' }); }
+      catch (e) { collar = null; }
+      if (!collar || !collar.geometry) break;
+      var cb = safeBbox(collar.geometry), best = 0;
+      live.forEach(function (n) {
+        if (!bboxHit(cb, n.bbox)) return;
+        var a = safeIntersectArea(collar.geometry, n.f.geometry);
+        if (a > best) { best = a; owner = n; }
+      });
+    }
+    if (!owner) return;   // nothing within 5 km — leave the hole rather than guess wildly
+
+    // Replaced, not mutated: rawRegionsFC is the cached live fetch and is reused for every
+    // date the reader picks, so writing a reconstructed geometry into one of its features
+    // would poison every later reconstruction with the first one's inference.
+    owner.f = { type: 'Feature', properties: owner.f.properties,
+                geometry: safeUnion(owner.f.geometry, rest) };
+    owner.bbox = safeBbox(owner.f.geometry);
+    working.set(owner.id, owner.f);
+  });
+}
+
 // Reconstructs state as of the end of targetDate (YYYY-MM-DD) from the live raw fetch plus
 // every history entry dated after it. Returns { regions, changedIds }.
 // Entries inside the retention window may still carry kind:"zone" from before CONVENTIONS
@@ -1913,14 +2041,34 @@ function reconstructStateAsOf(targetDate) {
       e.changes.forEach(function (c) { if (!earliest.has(c.id)) earliest.set(c.id, c); });
     });
 
+  var vacated = [];   // ground an undone change stopped covering — see returnVacatedGround()
+  function vacate(geom) {
+    if (!geom || typeof turf === 'undefined') return;
+    var a = 0;
+    try { a = turf.area(asFeature(geom)); } catch (e) { return; }
+    if (a > 0) vacated.push({ geom: geom, area: a });
+  }
+
   earliest.forEach(function (c, id) {
+    // `replay_base_geometry` is the exact pre-change shape when a record carries one, and is
+    // read in preference to `base_geometry` so that records written once editor.html logs its
+    // silent clips (docs/TODO.md) replay exactly instead of going through the inference in
+    // returnVacatedGround(). Absent from every record published so far, hence the fallback.
+    var base = c.replay_base_geometry || c.base_geometry;
     if (c.action === 'add') {
+      var gone = working.get(id);
       working.delete(id);   // did not exist as of targetDate
+      vacate((gone && gone.geometry) || c.geometry);
       return;
     }
     if (c.action === 'remove') {
-      var props = { id: id, name: c.prev_name || c.name, faction: c.prev_faction };
-      working.set(id, { type: 'Feature', properties: props, geometry: c.base_geometry });
+      // `pattern` is carried across: without it a contested pocket or an attack hatch comes
+      // back from the dead as a solid faction fill, which reads as a claim the record does not
+      // make. zone_type is genuinely unknown here — the published projection drops it — and is
+      // now read nowhere on this path, since the highlight rule below no longer needs it.
+      var props = { id: id, name: c.prev_name || c.name, faction: c.prev_faction,
+                    pattern: c.pattern || null };
+      working.set(id, { type: 'Feature', properties: props, geometry: base });
       return;
     }
     // update
@@ -1929,51 +2077,176 @@ function reconstructStateAsOf(targetDate) {
     var props2 = Object.assign({}, cur.properties);
     if (c.prev_faction) props2.faction = c.prev_faction;
     if (c.prev_name) props2.name = c.prev_name;
-    working.set(id, { type: 'Feature', properties: props2, geometry: c.base_geometry || cur.geometry });
+    if (base && cur.geometry) vacate(safeDifference(cur.geometry, base));
+    working.set(id, { type: 'Feature', properties: props2, geometry: base || cur.geometry });
   });
 
-  var regions = [];
-  working.forEach(function (f) { regions.push(f); });
+  returnVacatedGround(working, vacated);
+  return stateWith(working, targetDate);
+}
 
-  // Same rule as isRecentRegion() for the live view: an oblast only belongs in the
-  // "changed" set if the change was a genuine oblast-tool faction event (add or
-  // reassignment), not a geometry-only touch-up — otherwise browsing history would light
-  // up a whole oblast for every meld/cut/redraw that happened to land on target date + 1.
-  // Everything else (settlement-scale, oblast or not) is always newsworthy at its own size.
+// ── What lights up on a past date ───────────────────────────────────────────────
+  // "Recent" on the live view means "changed within the last 24 h" (isRecentChange). The same
+  // sentence about a day being VIEWED is "changed on that day", so the highlight comes from
+  // the entries dated targetDate itself — which the replay above leaves applied, since it only
+  // reverts entries dated after it. It used to come from the earliest entry AFTER the date,
+  // i.e. from what was about to change next: a different question, and not the one the reader
+  // asked by picking the date.
+  //
+  // AND IT LIGHTS UP THE GROUND THAT MOVED, NOT THE FEATURE THAT MOVED (reported 2026-09-01 as
+  // whole pre-existing zones showing as new). A day's `update` on a region is almost never
+  // that region changing hands — it is a pocket melded in, or a neighbour clipped: a few km²
+  // against a feature that can be a whole front sector. Painting the feature said "all of this
+  // just changed", the same over-report the oblast rule already existed to stop, one size
+  // class down. So an update with no faction flip contributes a `geometry - base_geometry`
+  // sliver instead — a pseudo-feature carrying its parent's colour and pattern, appended last
+  // so it paints over the parent (CONVENTIONS §10 draw order).
+  //
+  // That also subsumes the old oblast carve-out: an oblast wash melded into now lights up the
+  // meld, and only a genuine reassignment still lights up the whole shape. The carve-out tested
+  // `fields`, which computeFrontlineHistory() drops from the published projection, so it could
+  // only ever read as false; `prev_faction` is the published signal for the same thing, and
+  // diffState() sets it exactly when the faction moved.
+//
+// Shared by both paths below — a snapshot and a reverse replay disagree about how the ground
+// was arrived at, never about which of it moved that day, and the reader must not be able to
+// tell which path drew their date apart from how exact it is.
+// `stateDate` is the date the RENDERED state is from, which is not always the date the reader
+// picked: with no snapshot for the 27th the map shows the 25th, and lighting up the 27th's
+// changes would paint ground that is not in the shapes on screen.
+function highlightsForDate(stateDate, working) {
   var changedIds = new Set();
-  earliest.forEach(function (c, id) {
-    var cur = working.get(id);
-    var isOblast = cur && cur.properties && cur.properties.zone_type === 'oblast';
-    var isFactionEvent = c.action === 'add' || (c.fields || []).indexOf('faction') !== -1;
-    if (!isOblast || isFactionEvent) changedIds.add(id);
+  var gains = [];
+  ((lastHistory && lastHistory.entries) || []).forEach(function (e) {
+    if (e.date !== stateDate) return;
+    e.changes.forEach(function (c) {
+      if (c.action === 'remove') return;            // gone by the end of the day; nothing to paint
+      if (c.action === 'add' || c.prev_faction) { changedIds.add(c.id); return; }
+      if (!c.base_geometry || !c.geometry) return;  // a rename or a citation is not a territorial change
+      var gained = safeDifference(c.geometry, c.base_geometry);
+      // safeDifference() hands back its first argument when turf throws, which is the right
+      // "changed nothing" answer where the result is territory (the shape stays as it was) and
+      // the wrong one here, where it would light the whole feature up — the exact over-report
+      // this branch exists to stop. Identity, not equality: it is the same object back.
+      if (!gained || gained === c.geometry) return;
+      var parent = working.get(c.id), pp = (parent && parent.properties) || {};
+      var gid = c.id + '#gain';
+      gains.push({ type: 'Feature', geometry: gained,
+                   properties: { id: gid, name: c.name,
+                                 faction: c.faction || pp.faction,
+                                 pattern: c.pattern || pp.pattern || null } });
+      changedIds.add(gid);
+    });
   });
+  return { changedIds: changedIds, gains: gains };
+}
 
+// The shape both paths hand to renderRegionsLayer(): the day's features in published draw
+// order, the highlight slivers appended after them so they paint on top (CONVENTIONS §10),
+// and the id set saying which of the lot is lit.
+function stateWith(working, stateDate) {
+  var h = highlightsForDate(stateDate, working);
+  var regions = [];
+  working.forEach(function (f) { if (f && f.geometry) regions.push(f); });
+  h.gains.forEach(function (f) { regions.push(f); });
   return {
     regions: { type: 'FeatureCollection', features: regions },
-    changedIds: changedIds,
+    changedIds: h.changedIds,
   };
 }
 
-// A past date is drawn from the full file, not from tiles — see ensureFullRegions() for why —
-// so this is the one path in the viewer that still waits on a network fetch before it can
-// draw. selectedDate is set FIRST, so the tile layer stops rendering the live front the
-// moment the reader picks a date rather than leaving it up for the length of the fetch.
+// ── Dated snapshots: the calendar's first choice ──────────────────────────────────
+// `history/<date>.geojson` is the whole map as that day ended — see shared/snapshots.mjs for
+// why the calendar reads a file that IS a map rather than rebuilding one from the change log,
+// and why one file per PUBLISH day covers every date. Nothing here reconstructs anything: the
+// snapshot is rendered as it stands, which is the entire point of it. Everything above stays
+// as the fallback for a date older than the oldest snapshot, and for a deploy that has not
+// published a history/ folder yet.
+//
+// Memoised like ensureFullRegions(), and like it a missing folder is a valid state rather
+// than a failure — this resolves to null instead of rejecting, and the caller falls back. The
+// memo is dropped when the fills manifest reports a republish, because that is exactly when a
+// new day's snapshot appears and is the same signal the tile cache already trusts.
+var snapshotIndexPromise = null;
+function ensureSnapshotIndex() {
+  if (!snapshotIndexPromise) {
+    snapshotIndexPromise = fetch(snapshotIndexPath() + '?_=' + Date.now())
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (idx) { return (idx && Array.isArray(idx.dates)) ? idx : null; })
+      .catch(function () { return null; });
+  }
+  return snapshotIndexPromise;
+}
+
+// One snapshot at a time. They are ~580 KB parsed (and the three pre-lattice backfill dates
+// are several MB), so holding every date the reader has clicked through would cost more
+// memory than re-fetching the one they came back to.
+var snapshotCache = { date: null, fc: null };
+function loadSnapshot(date) {
+  if (snapshotCache.date === date && snapshotCache.fc) return Promise.resolve(snapshotCache.fc);
+  return fetch(snapshotPath(date) + '?_=' + Date.now())
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (fc) { snapshotCache = { date: date, fc: fc }; return fc; });
+}
+
+function stateFromSnapshot(fc, stateDate) {
+  var working = new Map();
+  (fc.features || []).forEach(function (f) {
+    if (f && f.geometry && f.properties && f.properties.id) working.set(f.properties.id, f);
+  });
+  return stateWith(working, stateDate);
+}
+
+// A past date is drawn from a whole-feature file, never from tiles — a tile only holds the
+// piece of a feature that fell inside it — so this is the one path in the viewer that still
+// waits on a network fetch before it can draw. selectedDate is set FIRST, so the tile layer
+// stops rendering the live front the moment the reader picks a date rather than leaving it up
+// for the length of the fetch.
+//
+// Two sources, tried in order, and the difference between them is exactness:
+//   1. `history/<date>.geojson` — the map as that day ended, rendered as it stands. Where the
+//      picked date has no snapshot the newest one before it is used, which is exact for a day
+//      nothing was published on and stale by a publish for the backfilled range; either way
+//      the status line names the date actually on screen (see showingNearest).
+//   2. reconstructStateAsOf() against control_regions.geojson, for dates older than the oldest
+//      snapshot. It has to infer the ground an undone pocket vacated — returnVacatedGround()
+//      says how, and why the inference exists at all — so it is the second choice, not the
+//      first, wherever a snapshot can answer instead.
 function showHistoricalDate(targetDate) {
   if (!lastHistory) return;
   selectedDate = targetDate;
   clearFillTiles();
   document.getElementById('history-live').classList.remove('active');
   document.getElementById('history-live').disabled = false;
-  document.getElementById('status-msg').textContent = t('showingAsOf')(targetDate);
-  document.getElementById('status-msg').className = '';
-  ensureFullRegions().then(function () {
-    if (selectedDate !== targetDate) return;   // the reader moved on while this was in flight
-    var result = reconstructStateAsOf(targetDate);
-    renderRegionsLayer(result.regions, result.changedIds);
+  var msgEl = document.getElementById('status-msg');
+  msgEl.textContent = t('showingAsOf')(targetDate);
+  msgEl.className = '';
+
+  ensureSnapshotIndex().then(function (idx) {
+    if (selectedDate !== targetDate) return null;   // the reader moved on while this was in flight
+    var snapDate = idx ? snapshotForDate(idx.dates, targetDate) : null;
+    if (snapDate) {
+      return loadSnapshot(snapDate).then(function (fc) {
+        return { result: stateFromSnapshot(fc, snapDate), shown: snapDate };
+      });
+    }
+    return ensureFullRegions().then(function () {
+      return { result: reconstructStateAsOf(targetDate), shown: targetDate };
+    });
+  }).then(function (out) {
+    if (!out || selectedDate !== targetDate) return;
+    renderRegionsLayer(out.result.regions, out.result.changedIds);
+    msgEl.textContent = out.shown === targetDate
+      ? t('showingAsOf')(targetDate)
+      : t('showingNearest')(out.shown, targetDate);
+    msgEl.className = '';
   }).catch(function (err) {
     if (selectedDate !== targetDate) return;
-    document.getElementById('status-msg').textContent = t('controlAreasUnavailable')(err.message);
-    document.getElementById('status-msg').className = 'err';
+    msgEl.textContent = t('controlAreasUnavailable')(err.message);
+    msgEl.className = 'err';
   });
 }
 function showLive() {
