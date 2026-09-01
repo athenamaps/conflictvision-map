@@ -193,7 +193,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   <button class="tool" id="tool-measure" title="Draw a polygon to measure its area and perimeter">📐 Measure</button>
   <span id="search-slot"></span>
   <button class="tool" id="tool-lang" title="Switch language">RU</button>
-  <button class="tool" id="tool-methodology" title="How this map is made">&#9432; Methodology</button>
+  <button class="tool" id="tool-methodology" title="How this map is made" style="display:none">&#9432; Methodology</button>
   <span id="last-updated">Loading…</span>
 </div>
 
@@ -383,6 +383,23 @@ function t(key) { return STRINGS[currentLang][key]; }
 // the opposite of what §7.3 is for. When the channel exists, set this to a URL or a plain
 // handle and update docs/METHODOLOGY.md §5 in the same commit; the panel renders either.
 var METHODOLOGY_CONTACT = null;
+
+// PARKED 2026-09-01 — flip to true to put the button back. Everything below stays wired up:
+// the panel, both languages, the backdrop and Escape, and the #methodology deep link all
+// still work. Only the toolbar button is hidden, which is the sole discoverable way in, so
+// for a reader arriving at the map the methodology is simply not offered yet.
+//
+// Off because the operator intends to rewrite the text before readers see it, NOT because
+// anything here is broken or wrong. Two consequences worth knowing before touching it:
+//
+//   • `map.html#methodology` still opens the panel on purpose. That is the preview path for
+//     editing the prose — check the wording in both languages without unhiding the button —
+//     and it costs no privacy that the flag could buy back anyway, since this whole file is
+//     served to every reader and the text is readable in view-source either way.
+//   • docs/METHODOLOGY.md is the long version of this same text and is NOT parked; it is a
+//     repo document, not something a reader can reach. Rewriting one still means rewriting
+//     the other in the same commit (CLAUDE.md).
+var METHODOLOGY_ENABLED = false;
 
 var METHODOLOGY = {
   en: {
@@ -2076,8 +2093,13 @@ function renderStaticChrome() {
   measureBtn.textContent = t('measure');
   measureBtn.title = t('measureTitle');
   var methBtn = document.getElementById('tool-methodology');
+  // Labelled even while parked, so flipping METHODOLOGY_ENABLED is genuinely all it takes —
+  // a button that comes back unlabelled or in the wrong language is the usual way a parked
+  // feature rots. The inline display:none in the markup is what stops it flashing on load;
+  // clearing the property here is what lets it through once the flag is on.
   methBtn.textContent = t('methodology');
   methBtn.title = t('methodologyTitle');
+  methBtn.style.display = METHODOLOGY_ENABLED ? '' : 'none';
   // Re-render rather than merely relabel: the panel's prose is a whole document, and leaving
   // it in the previous language behind a translated button is the one place this page could
   // show two languages at once.
@@ -2126,6 +2148,8 @@ document.getElementById('methodology-overlay').addEventListener('click', functio
 renderStaticChrome();
 // Deep link: /#methodology opens straight into the panel, so the methodology can be sent as
 // a link. After renderStaticChrome() because the panel renders from the resolved language.
+// Deliberately NOT gated on METHODOLOGY_ENABLED — see the PARKED note there; while the button
+// is hidden this is the operator's preview path for the prose.
 // The hashchange half covers the same link arriving at a reader who already has the map
 // open, where the browser changes the hash without reloading and the load-time check above
 // never runs again.
