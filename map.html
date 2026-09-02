@@ -1977,9 +1977,17 @@ function safeHttpUrl(u) {
   var s = (u || '').trim();
   return /^https?:\/\//i.test(s) ? s : null;   // never emit an href for any other scheme
 }
+// `label` is the canonical (Russian) text and `label_en` an optional English override,
+// shown only in English mode — the same rule the event-card name above follows. Every
+// source written before this field existed is a URL, which reads the same in either
+// language and falls through to `label` in both.
+function sourceLabel(src) {
+  var en = (src.label_en || '').trim();
+  return ((currentLang === 'en' && en) ? en : (src.label || '')).trim();
+}
 function sourceHtml(src) {
   if (!src) return '';
-  var label = (src.label || '').trim();
+  var label = sourceLabel(src);
   var url = safeHttpUrl(src.url);
   if (url) {
     // noopener/noreferrer because the href is operator-supplied and points off-site, and
