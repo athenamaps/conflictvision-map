@@ -12,7 +12,7 @@
 
    Moved out of editor.html on 2026-08-30 with no change to any body. */
 
-import { nowIso } from './geometry.mjs';
+import { nowIso, geomAreaKm2 } from './geometry.mjs';
 import { orderRegions } from './regions.mjs';
 
 // ─────────────────────────────────────────────────────────────
@@ -150,8 +150,44 @@ function fillPruneGeom(geom) {
   return null;
 }
 
-// The 15 m gap close, lifted verbatim from map.html's closeGaps() — including its fallback of
-// keeping the unbuffered feature when turf throws, so a geometry that defeats the buffer still
+// A 15 m outward buffer can only ever GROW a shape, so a result smaller than what went in is
+// not a gap close — it is jsts having failed, and the only question is how much territory the
+// failure takes with it.
+//
+// turf.buffer is jsts's BufferOp, and it collapses on a ring carrying a zero-area SPIKE: three
+// consecutive vertices a → b → a, where the ring leaves and comes straight back along its own
+// path. Such a ring is valid by every cheap test — turf.kinks reports 0, the area is exactly
+// right, turf.cleanCoords leaves it alone, shapely calls it valid — and it is not rare, because
+// grid-snapping a boolean-op result produces one whenever a sub-metre wiggle lands both arms on
+// the same lattice cell. There were 537 of them across the 90 features in the file on the day
+// this was found. Nearly all are harmless — only two had arms longer than 5 m, and both came
+// out of one edit. One was fatal: "Грузское под контролем", whose spike had a 28 m arm,
+// buffered from 3,410,574 m² to 1,680 m² — 0.05% of itself, returned as three slivers a few
+// metres across, with no throw and no warning.
+//
+// What that looked like on the public map is the reason for this guard rather than a repair.
+// The zone still had its entry in props.json and still had tiles, so nothing downstream could
+// tell it had been gutted; and because a drawn region CLIPS the ground beneath it
+// (ARCHITECTURE.md §3.6), the red wash underneath had a zone-shaped hole cut in it waiting to
+// be covered. The reader got a hole: a white polygon in the exact outline of the zone, on a map
+// that showed it filled in the editor. Reported 2026-09-14 alongside the attack-hatch colour
+// bug, and this is the half that generalises — a rendering pipeline must not be able to lose
+// territory silently, whatever geometry the operator hands it.
+//
+// So the existing fallback grows a second arm. Keeping the unbuffered feature when turf THREW
+// was already the rule; keeping it when turf returned a shape that lost area is the same rule
+// applied to the same failure arriving quietly. The cost of the fallback is that one feature
+// goes out without its 15 m gap close and may show a hairline seam against a neighbour. The
+// cost of not having it is the feature.
+//
+// 0.99 rather than 1.0 because geomAreaKm2() is spherical and the buffer is planar (turf
+// projects, offsets and unprojects), so the two disagree in the sixth digit on a large oblast;
+// measured across all 90 features the ratios run 1.0005-1.0423 and the failure is 0.0005, so
+// there is nothing anywhere near the threshold to argue about.
+var FILL_BUFFER_MIN_RATIO = 0.99;
+
+// The 15 m gap close, lifted from map.html's closeGaps() — including its fallback of keeping
+// the unbuffered feature when the buffer defeats a geometry, so a feature that defeats it still
 // gets published rather than vanishing. Same buffer, same defaults, same result; it just runs
 // once here instead of once per reader per load.
 function fillClosedFeatures(regionsFC) {
@@ -161,10 +197,17 @@ function fillClosedFeatures(regionsFC) {
     if (!f.geometry) return;
     var b = null;
     try { b = turf.buffer(f, FILL_GAP_CLOSE_M, { units: 'meters' }); } catch (e) {}
-    if (b && b.geometry) { b.properties = f.properties; out.push(b); }
-    else out.push(f);
+    if (b && b.geometry && !bufferLostGround(f.geometry, b.geometry)) {
+      b.properties = f.properties;
+      out.push(b);
+    } else out.push(f);
   });
   return out;
+}
+function bufferLostGround(before, after) {
+  var a0 = geomAreaKm2(before);
+  if (!a0) return false;   // nothing to lose; let whatever the buffer made through
+  return geomAreaKm2(after) < a0 * FILL_BUFFER_MIN_RATIO;
 }
 
 // Only what map.html reads to PAINT a shape, under the feature's own property names so that
