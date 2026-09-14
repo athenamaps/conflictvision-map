@@ -1058,38 +1058,6 @@ L.polyline(CLAIMED_BORDER, {
 // how the raw hex looks in isolation.
 var RECENT_COLORS = { ukraine: '#0044ff', russia: '#ee0000' };
 
-// ATTACK_COLORS is the band colour for the attack hatch, and it exists because the hatch has
-// to read against ground its OWN faction already holds.
-//
-// An attack hatch is exempt from clipUnderlyingRegions() by design (ARCHITECTURE.md §3.6): it
-// claims where fighting is happening, not who holds the ground, so it is drawn ON TOP of
-// whoever does. orderRegions() sorts it last so a later fill cannot bury it. Both of those are
-// about draw ORDER, and both were fixed for that reason (2026-08-30) — but neither helps when
-// the thing drawn on top is the same colour as the thing under it. Painting the bands in
-// FACTIONS[fid].color made a hatch invisible in exactly the case that matters most, an attack
-// launched across ground the attacker already holds, and it had been invisible in every case
-// until now only by luck: all four hatches in the file were Ukrainian and all four sat over
-// Russian red. The fifth, "Атаки в сторону заречного" (russia, 2026-09-12), sits wholly inside
-// a russia oblast wash — red bands on red, zero pixels of difference. Reported 2026-09-14.
-//
-// Measured the way RECENT_COLORS above asks for, composited through this pane's 0.42 opacity
-// against both a light road basemap and a satellite tile, and checked for the grey-smudge
-// failure that comment describes:
-//
-//   russia  #d50000 bands on the flat #f87171 fill  HSL(2,68,73) vs HSL(3,80,85), RGB dist 69
-//           and on editor.html's deeper #ef4444     HSL(2,68,73) vs HSL(2,77,81), RGB dist 42
-//   ukraine #0026cc bands on the flat #3b82f6 fill  HSL(229,58,72) vs HSL(217,75,81), dist 49
-//
-// Both keep a wider raw RGB spread than the base colour they sit on (213 and 204 against 135
-// and 187), which is the anti-grey rule stated above RECENT_COLORS, and both stay the faction's
-// own hue — a hatch has to say WHO is attacking, so this is a shade, never a third colour.
-//
-// Its own table rather than a reach into RECENT_COLORS, even though both are "a deeper shade of
-// the faction colour": those two marks answer to different things (one to a 24 h clock, one to
-// what is underneath), and contestedPattern() below carries the comment explaining what it cost
-// the last time one hatch quietly took its colours from a table edited for something else.
-var ATTACK_COLORS = { ukraine: '#0026cc', russia: '#d50000' };
-
 // STRIPE_BAND is the shared band width (px, at pattern-tile scale) for every hatch —
 // contested (two-tone) and attack (one-tone-on-transparent) alike, so the two read as one
 // visual family. Bands, not hairlines: each colour covers an equal, deliberately wide
@@ -1126,18 +1094,10 @@ function contestedPattern(recent) {
     ? stripePattern('contested_r', RECENT_COLORS.ukraine, RECENT_COLORS.russia)
     : stripePattern('contested_n', FACTIONS.ukraine.color, FACTIONS.russia.color);
 }
-// No `recent` variant, unlike the flat fills and the contested hatch. An attack hatch is
-// already excluded from the events scroller (shared/history.mjs returns no gain label for
-// pattern:"attack") and carries no km² counter (ARCHITECTURE.md §3.5), so lighting one up as a
-// fresh change was the thing isRecentRegion()'s comment warns against — a zone shouting "this
-// just changed" in colour with no card in the log to explain it. The 24 h state also read as
-// the bug's only relief: a hatch drawn over its own faction's ground was visible on the day it
-// was drawn, in RECENT_COLORS, and vanished a day later when it fell back to the flat faction
-// colour. One constant band colour is both the fix and the honest mark.
-function attackPattern(faction_id) {
-  var color = ATTACK_COLORS[faction_id]
-           || (FACTIONS[faction_id] || { color: '#555555' }).color;
-  return stripePattern('attack_' + faction_id, color, null);
+function attackPattern(faction_id, recent) {
+  var f = FACTIONS[faction_id] || { color: '#555555' };
+  var color = (recent && RECENT_COLORS[faction_id]) || f.color;
+  return stripePattern('attack_' + faction_id + (recent ? '_r' : '_n'), color, null);
 }
 function isRecentChange(iso) {
   if (!iso) return false;
@@ -1152,7 +1112,7 @@ function factionStyle(faction_id, pattern, recent) {
   var paint = faction_id === 'contested'
     ? contestedPattern(recent)
     : pattern === 'attack'
-    ? attackPattern(faction_id)
+    ? attackPattern(faction_id, recent)
     : (recent && RECENT_COLORS[faction_id]) || f.color;
   return {
     pane: 'fills', renderer: fillsR,
