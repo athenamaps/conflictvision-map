@@ -316,24 +316,49 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   <span id="count"></span>
 </div>
 
-<!-- Pinned by version AND by hash. Each sha384 below was computed from the exact URL beside
-     it; the browser refuses the file if the CDN ever serves different bytes. A version bump
-     is a TWO-PART change — new URL and freshly computed hash. Stage 21 vendors these three
-     files into the published tree and drops the CDN from the reader's path; these are the
-     hashes it checks the vendored bytes against, so keep them in step with the copies.
-       https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css
+<!-- Vendored, pinned by version AND by hash (Stage 13, then Stage 21.4). The three files
+     under lib/ are byte-for-byte the CDN files Stage 13 hashed, taken from the URLs below;
+     the browser refuses any of them whose bytes differ from its integrity attribute, and so
+     does the publisher — server/publisher/site.mjs reads these attributes and will not
+     publish a lib/ file that fails them. A version bump is a THREE-part change: the file
+     under a new versioned directory, its freshly computed hash here, and the matching CDN
+     URL in the fallback below.
+       lib/leaflet-1.9.4/leaflet.min.css  ← https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css
          sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb
-       https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js
+       lib/leaflet-1.9.4/leaflet.min.js   ← https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js
          sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO
-       https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js
+       lib/turf-6.5.0/turf.min.js         ← https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js
          sha384-82q0nm29xZzIo5BMtDYnh2/NxeO6FoaK1S/0nF84w3cEsqbBfun3JdMyDVYWfVY5
--->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+     leaflet.min.css names images/*.png for the default marker and the stock layers control;
+     this page uses neither (divIcon handles, a hand-rolled switcher), so they are not vendored
+     and nothing requests them. -->
+<link rel="stylesheet" href="lib/leaflet-1.9.4/leaflet.min.css"
       integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+<script src="lib/leaflet-1.9.4/leaflet.min.js"
         integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"
+<script src="lib/turf-6.5.0/turf.min.js"
         integrity="sha384-82q0nm29xZzIo5BMtDYnh2/NxeO6FoaK1S/0nF84w3cEsqbBfun3JdMyDVYWfVY5" crossorigin="anonymous"></script>
+<!-- The CDN, ONLY where lib/ is missing — which is GitHub Pages until Stage 28. Stage 21.6
+     keeps that copy live in parallel, and editor.html publishes this same file there on every
+     save without a lib/ beside it (PUBLISHED_FILES is the public repo's allowlist, and this
+     stage does not widen it). Without this, the Pages map would lose Leaflet and draw nothing.
+     From the storage copy lib/ is present, the test below is false, and no request goes to
+     either CDN. document.write rather than an appended element because it is the one way to
+     load a script that the module below is guaranteed to run after: a written parser-blocking
+     tag runs before parsing resumes. Leaflet's absence stands in for its stylesheet's — the
+     two are published together or not at all. Delete this block at Stage 28. -->
+<script>
+if (!window.L) {
+  document.write('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"'
+    + ' integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous"/>'
+    + '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"'
+    + ' integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"><\/script>');
+}
+if (!window.turf) {
+  document.write('<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"'
+    + ' integrity="sha384-82q0nm29xZzIo5BMtDYnh2/NxeO6FoaK1S/0nF84w3cEsqbBfun3JdMyDVYWfVY5" crossorigin="anonymous"><\/script>');
+}
+</script>
 <!-- Local, and shared verbatim with editor.html. It fetches settlement_index.json
      lazily on the first focus of the search field, so the opening view still costs
      what it did before this feature existed. -->
@@ -450,6 +475,7 @@ var STRINGS = {
     basemapMaps: 'Maps', basemapSatellite: 'Satellite', basemapTerrain: 'Terrain',
     layerYandexMap: 'Yandex (RU)', layerGoogleRoads: 'Google Roads',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Yandex Hybrid', layerGoogleHybrid: 'Google Hybrid',
+    layerOwnMap: 'OpenStreetMap',
     layerOpenTopo: 'OpenTopoMap',
   },
   ru: {
@@ -500,6 +526,7 @@ var STRINGS = {
     basemapMaps: 'Карты', basemapSatellite: 'Спутник', basemapTerrain: 'Рельеф',
     layerYandexMap: 'Яндекс (рус)', layerGoogleRoads: 'Google Дороги',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Яндекс Гибрид', layerGoogleHybrid: 'Google Гибрид',
+    layerOwnMap: 'OpenStreetMap',
     layerOpenTopo: 'OpenTopoMap',
   },
 };
@@ -782,23 +809,113 @@ var openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   maxZoom: 17, subdomains: ['a','b','c'], crsKey: '3857', highlightScrim: 0,
 });
 
-// The basemap the map opens on follows the language the reader arrives with — Google Roads
-// for English, Yandex for Russian — on the theory that a reader of either language is best
-// served by the street map that labels places in it. `currentLang` is already resolved from
-// localStorage above, so a returning reader gets the layer matching the language they last
-// chose.
+// ── Our own basemap (step1-plan Stage 25, step1-architecture §6 Р6) ─────────────
+// OSM vector tiles of Ukraine plus an 80 km border strip, in ONE PMTiles archive we serve
+// ourselves, drawn by MapLibre GL inside a Leaflet layer. It is what the map opens on, so by
+// default no request goes to Yandex or Google at all — they stay in the switcher as extras.
+// server/tools/build_basemap.mjs builds everything under base/, publish_basemap.mjs uploads
+// it, and docs/RUNBOOK.md has the yearly rebuild.
 //
-// It is a DEFAULT, read once at load, and nothing re-derives it afterwards. In particular the
-// RU/EN button must never switch basemaps: by the time it is pressed the reader may well have
-// picked a layer deliberately, and swapping tiles under them to follow a UI-language toggle
-// throws that away. See setLanguage() at the bottom of this file, which rebuilds the switcher's
-// labels and pointedly leaves activeBasemap alone.
+// A LAYER, not an engine change (Р7): Leaflet still owns the map, the CRS, every fill and the
+// four visual invariants, all verified against its canvas renderer. MapLibre only paints into
+// a canvas in the tile pane (z-index 200), under highlightScrim (399) and fills (400) exactly
+// as the raster tiles do. The Leaflet bridge keeps the GL camera one zoom level behind
+// Leaflet's (MapLibre's tiles are 512 px), so the two agree on the ground.
+//
+// EVERY PATH IS VERSIONED, because §4.5 caches /base/ as immutable for a year. A new archive
+// or a new library is a new name, and these strings change in the same commit as the build.
+var OWN_BASEMAP = {
+  archive: 'base/ua-2026-09.pmtiles',
+  scripts: [   // loaded in this order; the bridge needs maplibregl and L to exist first
+    'base/lib/maplibre-gl-5.24.0.js',
+    'base/lib/leaflet-maplibre-gl-0.1.4.js',
+    'base/lib/pmtiles-4.5.0.js',
+    'base/lib/protomaps-basemaps-5.7.2.js',
+  ],
+  // `{fontstack}` is a font name with spaces ("Noto Sans Regular"); storage keys have none,
+  // so the directories are hyphenated and transformRequest below makes the same substitution.
+  glyphs: 'base/fonts/{fontstack}/{range}.pbf',
+  sprite: 'base/sprites/v4/light',
+  attribution: '<a href="https://protomaps.com">Protomaps</a> &copy; '
+    + '<a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+};
+// The style is Protomaps' own light theme, generated per language by protomaps-basemaps, with
+// two changes that make it quiet — the fills are the subject here, not the map under them:
+//
+//  - Colours. Land is HIGHLIGHT_SCRIM_COLOR, which is OSM Carto's land and the backdrop the
+//    fills' 0.42 pane opacity and the recent-change highlight were both measured against (see
+//    the scrim notes below), so a faction colour reads here as it was tuned to. Protomaps'
+//    cyan water and its two saturated greens are pulled toward grey — a river still reads as
+//    a river, which matters on a front drawn along the Dnipro and the Oskil.
+//  - Layers. POIs, road shields, one-way arrows and house numbers are dropped: none of them
+//    helps anyone read who holds which ground, and all of them compete with the fills.
+//
+// `name:ru` / `name:en` come from the tiles themselves (OSM's own names, not a
+// transliteration), with the generator's fallbacks to the local name where a translation is
+// missing. The RU/EN button re-generates the style — see setLanguage().
+var OWN_BASEMAP_FLAVOR_OVERRIDES = {
+  background: '#dedbd4',   // beyond the extract's edge: a touch darker than land, so the
+                           // limit of the data reads as an edge rather than as empty ground
+  earth: HIGHLIGHT_SCRIM_COLOR,
+  water: '#b3cfd9',
+  park_b: '#c6dccb', wood_b: '#c8dcc3', scrub_b: '#c4d8ce',
+};
+var OWN_BASEMAP_DROPPED = { pois: 1, roads_shields: 1, roads_oneway: 1, address_label: 1 };
+
+function ownBasemapStyle(lang) {
+  var root = new URL('.', location.href).href;   // map.html's own directory
+  var flavor = Object.assign({}, basemaps.namedFlavor('light'), OWN_BASEMAP_FLAVOR_OVERRIDES);
+  return {
+    version: 8,
+    glyphs: root + OWN_BASEMAP.glyphs,
+    sprite: root + OWN_BASEMAP.sprite,
+    sources: {
+      protomaps: { type: 'vector', url: 'pmtiles://' + root + OWN_BASEMAP.archive },
+    },
+    layers: basemaps.layers('protomaps', flavor, { lang: lang })
+      .filter(function (l) { return !OWN_BASEMAP_DROPPED[l.id]; })
+      .map(function (l) { return oneLineLabel(l, lang); }),
+  };
+}
+// Protomaps sets a label in the reader's language AND, where the scripts differ, the local
+// name on a second line — "Bila Tserkva / Біла Церква" in English. Useful on a world map;
+// here it doubles every label on a map whose subject is the fills. One line, the reader's
+// language, the local name only where OSM has no translation.
+function oneLineLabel(layer, lang) {
+  var tf = layer.layout && layer.layout['text-field'];
+  if (!tf || JSON.stringify(tf).indexOf('"name:') < 0) return layer;
+  var layout = Object.assign({}, layer.layout, {
+    'text-field': ['coalesce', ['get', 'name:' + lang], ['get', 'name']],
+  });
+  return Object.assign({}, layer, { layout: layout });
+}
+
+// Filled in by mountOwnBasemap() once the archive has answered and the scripts are in; until
+// then an empty group, which is what lets the map OPEN on it without first asking Yandex or
+// Google for tiles. crsKey/highlightScrim live on the group, as with yandexHybrid: the
+// switcher and the scrim are handed the group, whatever is inside it.
+var ownBasemap = L.layerGroup([], { crsKey: '3857', highlightScrim: 0, maxZoom: 18 });
+var ownBasemapGL = null;        // the L.maplibreGL layer, once mounted
+var ownBasemapAvailable = true; // until the probe says otherwise; false hides it from the switcher
+
+// The basemap the map falls back to when our own is not there follows the language the reader
+// arrives with — Google Roads for English, Yandex for Russian — on the theory that a reader of
+// either language is best served by the street map that labels places in it. `currentLang` is
+// already resolved from localStorage above, so a returning reader gets the layer matching the
+// language they last chose.
+//
+// It is a DEFAULT, read once, and nothing re-derives it afterwards. In particular the RU/EN
+// button must never switch basemaps: by the time it is pressed the reader may well have picked
+// a layer deliberately, and swapping tiles under them to follow a UI-language toggle throws
+// that away. See setLanguage() at the bottom of this file, which rebuilds the switcher's labels,
+// re-labels our own basemap in place, and pointedly leaves activeBasemap alone.
 function defaultBasemapForLang(lang) { return lang === 'ru' ? yandexRu : googleRoads; }
-var initialBasemap = defaultBasemapForLang(currentLang);
+var initialBasemap = ownBasemap;
 var map = L.map('map', {
   layers: [initialBasemap],
   // Yandex is elliptical Mercator; getting this wrong at construction shifts every tile
-  // against the vectors until the first basemap switch happens to fix it.
+  // against the vectors until the first basemap switch happens to fix it. Our own basemap is
+  // 3857, and a fallback to Yandex goes through selectBasemap(), which does the switch.
   crs: initialBasemap.options.crsKey === '3395' ? L.CRS.EPSG3395 : L.CRS.EPSG3857,
 }).setView([48.5, 33.5], 7);
 map.attributionControl.setPrefix(false); // drop the "Leaflet" branding link/flag, keep tile attributions
@@ -898,9 +1015,10 @@ function buildBasemapControl(groups) {
 function basemapGroups() {
   return [
     { title: t('basemapMaps'), items: [
+      ownBasemapAvailable && { label: t('layerOwnMap'), layer: ownBasemap },
       { label: t('layerYandexMap'),   layer: yandexRu },
       { label: t('layerGoogleRoads'), layer: googleRoads },
-    ] },
+    ].filter(Boolean) },
     { title: t('basemapSatellite'), items: [
       { label: t('layerSatelliteEsri'), layer: satellite },
       { label: t('layerYandexHybrid'),  layer: yandexHybrid },
@@ -917,6 +1035,86 @@ function rebuildBasemapControl() {
   basemapControlInstance = buildBasemapControl(basemapGroups());
 }
 rebuildBasemapControl();
+
+// ── Mounting our own basemap — behind a presence check ─────────────────────
+// base/ is a second set of files this page depends on, so it is mounted the way
+// settlement_search.js is (docs/CLAUDE.md: "anything map.html loads from a second file of
+// ours is mounted behind a presence check"), for a reason that is live rather than
+// hypothetical: map.html is republished to GitHub Pages on every editor save, and Pages has
+// no base/ and cannot have one — the archive is 1.6 GB against a 100 MB file limit, and Pages
+// does not serve byte ranges reliably (step1-architecture §6 Р5). There the probe fails and
+// the map falls back to exactly what it opened on before this existed. Where base/ is
+// published (the object storage of Stage 21, or a local server that serves ranges), the
+// probe passes and nothing else about the page changes.
+//
+// The probe asks for the archive's first 7 bytes by Range and wants BOTH a 206 and the magic
+// "PMTiles". A 200 means the server ignored the Range header — it would be streaming all
+// 1.6 GB, which is why the request is aborted the moment the answer is not 206 — and a
+// PMTiles reader on such a server fetches whole files instead of tiles, so it counts as
+// absent. Everything after that (the scripts, WebGL) fails the same way: to the fallback,
+// with a console line, never to a blank map.
+function fallBackFromOwnBasemap(why) {
+  console.warn('own basemap unavailable (' + why + ') — opening on the language default');
+  ownBasemapAvailable = false;
+  if (activeBasemap === ownBasemap) selectBasemap(defaultBasemapForLang(currentLang));
+  rebuildBasemapControl();
+}
+function loadScript(src) {
+  return new Promise(function (resolve, reject) {
+    var el = document.createElement('script');
+    el.src = src;
+    el.async = false;   // keeps OWN_BASEMAP.scripts' order: the bridge after maplibre-gl
+    el.onload = resolve;
+    el.onerror = function () { reject(new Error(src + ' did not load')); };
+    document.head.appendChild(el);
+  });
+}
+function hasWebGL() {
+  try {
+    var c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch (e) { return false; }
+}
+function probeOwnBasemap() {
+  var ctl = new AbortController();
+  var timer = setTimeout(function () { ctl.abort(); }, 5000);
+  return fetch(OWN_BASEMAP.archive, { headers: { Range: 'bytes=0-6' }, signal: ctl.signal })
+    .then(function (r) {
+      if (r.status !== 206) { ctl.abort(); throw new Error('archive answered ' + r.status + ', not 206'); }
+      return r.arrayBuffer();
+    })
+    .then(function (buf) {
+      if (String.fromCharCode.apply(null, new Uint8Array(buf).slice(0, 7)) !== 'PMTiles') {
+        throw new Error('archive does not start with the PMTiles magic');
+      }
+    })
+    .finally(function () { clearTimeout(timer); });
+}
+function mountOwnBasemap() {
+  if (!hasWebGL()) { fallBackFromOwnBasemap('no WebGL in this browser'); return; }
+  probeOwnBasemap()
+    .then(function () { return Promise.all(OWN_BASEMAP.scripts.map(loadScript)); })
+    .then(function () {
+      var protocol = new pmtiles.Protocol();
+      maplibregl.addProtocol('pmtiles', protocol.tile);
+      ownBasemapGL = L.maplibreGL({
+        style: ownBasemapStyle(currentLang),
+        maxZoom: 18,
+        // The bridge reads attribution off the style's sources only after the style has
+        // loaded, which races Leaflet's own add/remove bookkeeping on a basemap switch. A
+        // fixed string is added and removed with the layer, like the raster layers' strings.
+        attributionControl: { customAttribution: OWN_BASEMAP.attribution },
+        transformRequest: function (url, kind) {
+          // MapLibre 5 hands the fontstack over unencoded ("Noto Sans Medium"); either
+          // spelling of the space becomes the hyphen the directories on disk carry.
+          return kind === 'Glyphs' ? { url: url.replace(/%20| /g, '-') } : { url: url };
+        },
+      });
+      ownBasemap.addLayer(ownBasemapGL);
+    })
+    .catch(function (err) { fallBackFromOwnBasemap(err.message); });
+}
+mountOwnBasemap();
 
 // ── Fills: one pane, one canvas, opaque shapes ────────────────────────────────
 // Mirrors bootstrap.html and editor.html. Per-feature fillOpacity composites wherever
@@ -1576,7 +1774,6 @@ function renderRegionsLayer(data, highlightIds) {
 //      can go.** Above it the same tiles are reused (Leaflet is drawing vectors, not images,
 //      so there is nothing to upscale), which is why the top zoom is published unsimplified
 //      while every zoom below it is simplified to 0.4 px of its own scale.
-var FILL_DIR = 'fills';
 var FILL_TILE_PAD = 0.25;      // fetch a quarter-viewport beyond the edge so a pan doesn't flash
 var FILL_CACHE_MAX = 600;      // parsed tiles kept in memory; the whole z10 set is ~1000
 
@@ -1719,14 +1916,20 @@ function fetchFillTile(key) {
   if (fillPending.has(key)) return fillPending.get(key);
   // No cache-buster: tiles are content-addressed by what is in them, and a save that changes
   // a tile changes the manifest's `built`, which is what drops the cache below. Busting every
-  // tile request would throw away the browser cache that makes panning back free.
-  var p = fetch(FILL_DIR + '/' + key + '.json')
+  // tile request would throw away the browser cache that makes panning back free. Under the
+  // versioned layout they are immutable at a path that names the version, which is the same
+  // statement made by the storage instead of by the page.
+  var dir = fillDir;
+  var p = fetch(dir + '/' + key + '.json')
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     })
     .then(function (d) {
       var items = (d && d.f) || [];
+      // A version landed while this was in flight: the tile belongs to a prefix the cache no
+      // longer describes, and caching it would draw last version's ground under this one's key.
+      if (dir !== fillDir) return items;
       fillCache.set(key, items);
       if (fillCache.size > FILL_CACHE_MAX) {
         // Map iterates in insertion order, so the oldest tile is the first key out. Anything
@@ -1742,7 +1945,9 @@ function fetchFillTile(key) {
       }
       return items;
     })
-    .finally(function () { fillPending.delete(key); });
+    // Only its own entry: after a new version, the key may already be pending again under the
+    // new prefix, and deleting that would let the next pan request the same tile twice.
+    .finally(function () { if (fillPending.get(key) === p) fillPending.delete(key); });
   fillPending.set(key, p);
   return p;
 }
@@ -1774,31 +1979,36 @@ function clearFillTiles() {
   fillRenderedSig = '';
 }
 
-// The 60 s poll re-reads only the manifest and props — 3 KB and 5 KB — and touches the tiles
-// themselves only if `built` moved, i.e. only if the operator actually published. That is the
-// whole reason a refresh is nearly free now: an unchanged map costs two small conditional
-// requests instead of re-downloading and re-buffering every fill on the front.
+// Called only when checkPublished() says something moved — under the versioned layout that is
+// only when the operator actually published, and then manifest and props come from the new
+// version's prefix, fetched once each and cached for good. Under the flat layout (Pages) it is
+// every poll, as it always was there, and `built` is what tells a republish from a re-read.
 function loadFillTiles() {
-  var bust = '?_=' + Date.now();
+  var dir = published.fills;
   Promise.all([
-    fetch(FILL_DIR + '/manifest.json' + bust).then(function (r) {
+    fetch(dir + '/manifest.json' + flatBust()).then(function (r) {
       if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }),
-    fetch(FILL_DIR + '/props.json' + bust).then(function (r) {
+    fetch(dir + '/props.json' + flatBust()).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }),
   ]).then(function (both) {
+    if (dir !== published.fills) return;   // overtaken by a newer version while in flight
     var manifest = both[0], props = both[1];
-    var republished = !fillManifest || fillManifest.built !== manifest.built;
+    var republished = !fillManifest || fillManifest.built !== manifest.built || fillDir !== dir;
     fillManifest = manifest;
     fillProps = props;
+    fillDir = dir;
     if (republished) {
       clearFillTiles();
       fillCache.clear();
       fillPending.clear();
+      // The full file is a different file after a publish — under the versioned layout a
+      // different NAME — so the calendar's memo of it goes with the tiles.
+      fullRegionsPromise = null;
       // A publish is also when a new day's snapshot lands, and the index naming it is
       // memoised — see ensureSnapshotIndex(). Dropping the memo (and the one cached snapshot,
       // which a same-day republish rewrites in place) is what stops a session that has been
@@ -1829,7 +2039,7 @@ map.on('moveend zoomend', refreshFillTiles);
 var fullRegionsPromise = null;
 function ensureFullRegions() {
   if (!fullRegionsPromise) {
-    fullRegionsPromise = fetch('control_regions.geojson?_=' + Date.now())
+    fullRegionsPromise = fetch(published.regions + flatBust())
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -1876,7 +2086,7 @@ function renderStats() {
 }
 
 function loadStats() {
-  fetch('territory_stats.json?_=' + Date.now())
+  fetch(published.stats + flatBust())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) { lastStats = data; renderStats(); })
     .catch(function () { lastStats = null; document.getElementById('stats-widget').style.display = 'none'; });
@@ -1896,7 +2106,7 @@ var lastHistory = null;
 var HISTORY_VISIBLE_FROM = '2026-08-07';
 
 function loadHistory() {
-  fetch('frontline_history.json?_=' + Date.now())
+  fetch(published.history + flatBust())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) {
       var entries = (data.entries || []).filter(function (e) { return e.date >= HISTORY_VISIBLE_FROM; });
@@ -2313,10 +2523,16 @@ function stateWith(working, stateDate) {
 // than a failure — this resolves to null instead of rejecting, and the caller falls back. The
 // memo is dropped when the fills manifest reports a republish, because that is exactly when a
 // new day's snapshot appears and is the same signal the tile cache already trusts.
+//
+// FLAT LAYOUT ONLY. The versioned layout has no history/ folder: snapshots are written by
+// editor.html's save and not by the database publisher, so under it there is nothing to fetch
+// and this resolves to null without a request — the calendar falls back to reconstruction, as
+// it already does for a deploy without the folder.
 var snapshotIndexPromise = null;
 function ensureSnapshotIndex() {
+  if (!snapshotIndexPromise && dataLayout === 'versioned') snapshotIndexPromise = Promise.resolve(null);
   if (!snapshotIndexPromise) {
-    snapshotIndexPromise = fetch(snapshotIndexPath() + '?_=' + Date.now())
+    snapshotIndexPromise = fetch(snapshotIndexPath() + flatBust())
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (idx) { return (idx && Array.isArray(idx.dates)) ? idx : null; })
       .catch(function () { return null; });
@@ -2330,7 +2546,7 @@ function ensureSnapshotIndex() {
 var snapshotCache = { date: null, fc: null };
 function loadSnapshot(date) {
   if (snapshotCache.date === date && snapshotCache.fc) return Promise.resolve(snapshotCache.fc);
-  return fetch(snapshotPath(date) + '?_=' + Date.now())
+  return fetch(snapshotPath(date) + flatBust())
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -2412,7 +2628,78 @@ document.getElementById('history-date').addEventListener('change', function (e) 
 });
 document.getElementById('history-live').addEventListener('click', showLive);
 
-function refresh() { loadFillTiles(); loadStats(); loadHistory(); }
+// ── What is published, and where: two layouts, one page ────────────────────────────
+// §4.3, the reading loop:
+//
+//     every 60 s: GET v/version.json       ~200 B
+//        version unchanged → do nothing at all
+//        changed           → the visible tiles and stats, from the paths it names
+//
+// v/version.json is the one published name that carries no version (§4.5), cached for 30 s, so
+// by each poll the browser's copy has expired and the request is a conditional one — a 304 of
+// a couple of hundred bytes when nothing moved, and the new file within one poll when
+// something did. Everything it names — v/regions-<v>.geojson, v/stats-<v>.json,
+// v/history-<v>.json, fills/<v>/ — is immutable at that name, so nothing is ever re-fetched
+// for freshness and nothing carries a cache-busting query string: a new version is new names.
+// The paths are keys from the root, exactly as server/publisher/publish.mjs's layoutFor()
+// writes them, and are fetched as written.
+//
+// THE FLAT LAYOUT is GitHub Pages, which Stage 21.6 keeps live in parallel until Stage 28 and
+// which editor.html goes on publishing this same file to. It has no v/, so the first poll's
+// 404 settles the page on the old fixed names for the session, and the loop there is exactly
+// what it was: re-read manifest, props, stats and history every minute, with `?_=` because
+// those names are NOT versioned and Pages caches them for ten minutes. Only a 404 decides
+// that — a network error is retried next poll rather than read as "this is Pages". Delete the
+// flat branch, flatBust() and FLAT_PATHS at Stage 28.
+var VERSION_URL = 'v/version.json';
+var FLAT_PATHS = {
+  fills: 'fills', regions: 'control_regions.geojson',
+  stats: 'territory_stats.json', history: 'frontline_history.json',
+};
+var dataLayout = null;   // null until the first answer, then 'versioned' or 'flat' for good
+var published = null;    // the version.json in force, or FLAT_PATHS
+var fillDir = null;      // the prefix fillCache's tiles came from
+
+function flatBust() { return dataLayout === 'flat' ? '?_=' + Date.now() : ''; }
+
+// Resolves true when there is something new to load, false when there is not.
+function checkPublished() {
+  if (dataLayout === 'flat') return Promise.resolve(true);
+  return fetch(VERSION_URL).then(function (r) {
+    if (r.status === 404 && dataLayout === null) {
+      dataLayout = 'flat';
+      published = FLAT_PATHS;
+      return true;
+    }
+    if (!r.ok) throw new Error('version.json: HTTP ' + r.status);
+    return r.json().then(function (v) {
+      if (!v || !Number.isInteger(v.version) || typeof v.fills !== 'string'
+          || typeof v.regions !== 'string' || typeof v.stats !== 'string' || typeof v.history !== 'string') {
+        throw new Error('version.json is not in the published shape');
+      }
+      if (published && published.version === v.version) return false;
+      dataLayout = 'versioned';
+      published = v;
+      return true;
+    });
+  });
+}
+
+var versionCheckFailed = false;
+function refresh() {
+  checkPublished().then(function (changed) {
+    // A poll that failed put its error on the status line; the next one that answers takes it
+    // off, even when it has nothing new — otherwise an unchanged version would leave it there.
+    if (versionCheckFailed) { versionCheckFailed = false; errors.regions = null; report(); }
+    if (!changed) return;
+    loadFillTiles(); loadStats(); loadHistory();
+  }).catch(function (err) {
+    // Whatever was on screen stays on screen; the next poll asks again.
+    versionCheckFailed = true;
+    errors.regions = err.message;
+    report();
+  });
+}
 
 // ── Measure tool: a menu-driven ruler for distances and areas ──────────────────────
 // A public-viewer aid, not territory data — its own pane with a dashed outline, so it
@@ -2962,6 +3249,16 @@ function setLanguage(lang) {
   // reader who chose a layer keeps it. buildBasemapControl() reads activeBasemap fresh, which
   // is what preserves the selection across this rebuild.
   rebuildBasemapControl();
+  // Our own basemap is the one layer whose labels are ours to set, so it re-labels in place
+  // rather than switching layers — the same map, its place names in the reader's language.
+  // setStyle diffs against the current style, so only the text-field expressions change and
+  // no tile is refetched. While the layer is switched off the GL map does not exist (the
+  // bridge destroys it on remove and builds a new one from options.style on add), so the
+  // stored style is replaced too — otherwise switching back would bring the old language.
+  if (ownBasemapGL) {
+    ownBasemapGL.options.style = ownBasemapStyle(currentLang);
+    if (ownBasemapGL.getMaplibreMap()) ownBasemapGL.getMaplibreMap().setStyle(ownBasemapGL.options.style);
+  }
   // Chrome only — the placeholder and the "village/hamlet" labels. Which of
   // name:uk / name:ru / name:en a result is shown under follows from this too,
   // but the names themselves are never translated (CONVENTIONS.md §6).
