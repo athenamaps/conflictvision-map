@@ -102,11 +102,11 @@ window.SettlementSearch = (function () {
   var owner = null;       // keys[i] belongs to rows[owner[i]]
   var loading = null;     // in-flight promise, so two mounts share one fetch
 
-  function load(url) {
+  function load(url, fetchFn) {
     if (loading) return loading;
     // Bump this whenever the row or oblast layout changes, so a browser cannot pair a
     // cached older index with newer code. v=2: oblasts became [uk, ru, en] triples.
-    loading = fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'v=2')
+    loading = fetchFn(url + (url.indexOf('?') < 0 ? '?' : '&') + 'v=2')
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -295,6 +295,10 @@ window.SettlementSearch = (function () {
      indexUrl   defaults to 'settlement_index.json'
      lang       'en' | 'ru' — display language, changeable later via setLang()
      onPick     function(result) — the page centres its own map
+     fetch      optional function(url) → Promise<Response>, used for the index
+                instead of window.fetch. map.html passes its storage fetch, so a
+                reader who has fallen back to the second storage finds the index
+                there too (step1-plan Stage 24)
 
      The index is fetched on FIRST FOCUS, not at page load. It is ~1 MB gzip
      against a live payload of ~176 KB, and most readers never search; paying
@@ -304,6 +308,7 @@ window.SettlementSearch = (function () {
     injectStyles();
     var lang = opts.lang || 'en';
     var url = opts.indexUrl || 'settlement_index.json';
+    var fetchFn = opts.fetch || function (u) { return fetch(u); };
     var debounceMs = opts.debounceMs == null ? 120 : opts.debounceMs;
 
     var wrap = document.createElement('div');
@@ -371,7 +376,7 @@ window.SettlementSearch = (function () {
     function ensureLoaded() {
       if (state === 'ready' || state === 'loading') return;
       state = 'loading';
-      load(url).then(function () {
+      load(url, fetchFn).then(function () {
         state = 'ready';
         if (input.value.trim()) run();
       }).catch(function () {

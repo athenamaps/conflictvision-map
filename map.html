@@ -809,6 +809,82 @@ var openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   maxZoom: 17, subdomains: ['a','b','c'], crsKey: '3857', highlightScrim: 0,
 });
 
+// ── Where published files come from: the primary storage, and the second one on failure ──
+// step1-plan Stage 24, step1-architecture §7.2. The publisher writes every version to two
+// storages at two independent providers, and this page reads the SECOND only after the first
+// has failed it: a request to the primary that errors, times out, or answers anything but a
+// success or a 404 is retried once against the secondary, and if the secondary answers, the
+// page stays there for the rest of the session. It is insurance, not load balancing — while
+// the primary answers, no request of any reader goes to the secondary.
+//
+// Everything published goes through storageFetch(): v/version.json, the tiles, manifest and
+// props, regions, stats, history, the search index and the basemap under base/. Not the page
+// itself, nor lib/ and shared/, which arrived with it — if the page loaded, they came from
+// wherever it did, and a page that cannot load is the domain's problem (Stage 19's spare),
+// not something the page can do anything about.
+//
+// A 404 is NOT a failure. It is a storage that is up answering about one key, and on GitHub
+// Pages the first poll's 404 on v/version.json is how the page learns it is on the flat
+// layout (see checkPublished()). Falling back on it would send every Pages reader to the
+// secondary.
+//
+// STORAGE_PRIMARY '' means this page's own directory, which is where the primary is while the
+// map is served from it. STORAGE_SECONDARY is the second storage's PUBLIC base URL, ending in
+// '/', and '' turns the fallback off. It is cross-origin, so that bucket needs CORS: GET and
+// HEAD from the map's origin, the Range request header allowed, and ETag and Content-Range
+// exposed — docs/RUNBOOK.md has it. The secondary may hold an OLDER version than the primary
+// (its last publish failed): falling back then shows that version, which is the point.
+var STORAGE_PRIMARY = '';
+var STORAGE_SECONDARY = '';
+if (STORAGE_SECONDARY && !/\/$/.test(STORAGE_SECONDARY)) STORAGE_SECONDARY += '/';
+// Time to the response HEADERS. The body is not under it: v/regions-<v>.geojson is megabytes,
+// and on a slow line its body alone can take longer than this without anything being wrong.
+var STORAGE_TIMEOUT_MS = 10000;
+var onSecondary = false;   // true once the primary has failed and the secondary answered
+
+function storageBase() { return onSecondary ? STORAGE_SECONDARY : STORAGE_PRIMARY; }
+// An absolute URL for the active storage's root, for what resolves URLs away from this
+// document — MapLibre's style, the basemap's script tags.
+function storageRoot() { return new URL(storageBase() || '.', location.href).href; }
+
+function fetchWithin(url, init) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function () {
+    ctl.abort(new Error('no answer in ' + STORAGE_TIMEOUT_MS / 1000 + ' s'));
+  }, STORAGE_TIMEOUT_MS);
+  return fetch(url, Object.assign({}, init, { signal: ctl.signal }))
+    .finally(function () { clearTimeout(timer); });
+}
+function storageFailed(r) { return !r.ok && r.status !== 404; }
+function discard(r) { if (r && r.body) r.body.cancel().catch(function () {}); }
+
+// `key` is a key from the storage root — 'v/version.json', 'fills/12/9/305/178.json' —
+// exactly as the publisher writes it and version.json names it.
+function storageFetch(key, init) {
+  if (onSecondary || !STORAGE_SECONDARY) return fetchWithin(storageBase() + key, init);
+  return fetchWithin(STORAGE_PRIMARY + key, init).then(function (r) {
+    if (!storageFailed(r)) return r;
+    return retryOnSecondary(key, init, new Error('HTTP ' + r.status), r);
+  }, function (err) {
+    return retryOnSecondary(key, init, err, null);
+  });
+}
+// Once, and only a success moves the session. When the secondary cannot help either, the
+// caller gets the PRIMARY's answer — the failure it would have had without a secondary.
+function retryOnSecondary(key, init, why, primaryResponse) {
+  var giveUp = function () { if (primaryResponse) return primaryResponse; throw why; };
+  return fetchWithin(STORAGE_SECONDARY + key, init).then(function (r) {
+    if (!r.ok) { discard(r); return giveUp(); }
+    discard(primaryResponse);
+    if (!onSecondary) {
+      onSecondary = true;
+      console.warn('primary storage failed on ' + key + ' (' + why.message
+        + ') — reading from the secondary for the rest of this session');
+    }
+    return r;
+  }, giveUp);
+}
+
 // ── Our own basemap (step1-plan Stage 25, step1-architecture §6 Р6) ─────────────
 // OSM vector tiles of Ukraine plus an 80 km border strip, in ONE PMTiles archive we serve
 // ourselves, drawn by MapLibre GL inside a Leaflet layer. It is what the map opens on, so by
@@ -863,7 +939,9 @@ var OWN_BASEMAP_FLAVOR_OVERRIDES = {
 var OWN_BASEMAP_DROPPED = { pois: 1, roads_shields: 1, roads_oneway: 1, address_label: 1 };
 
 function ownBasemapStyle(lang) {
-  var root = new URL('.', location.href).href;   // map.html's own directory
+  // The active storage's root: map.html's own directory, or the secondary's after a fallback —
+  // so a language switch after one rebuilds the style against the storage that is answering.
+  var root = storageRoot();
   var flavor = Object.assign({}, basemaps.namedFlavor('light'), OWN_BASEMAP_FLAVOR_OVERRIDES);
   return {
     version: 8,
@@ -957,6 +1035,7 @@ var settlementSearch = null;
 if (window.SettlementSearch) {
   settlementSearch = SettlementSearch.mount({
     container: document.getElementById('search-slot'),
+    fetch: function (url) { return storageFetch(url); },
     lang: currentLang,
     onPick: function (r) {
       map.setView([r.lat, r.lon], SettlementSearch.zoomFor(r.rank));
@@ -1075,25 +1154,28 @@ function hasWebGL() {
     return !!(c.getContext('webgl2') || c.getContext('webgl'));
   } catch (e) { return false; }
 }
+// Through storageFetch(), so a primary that fails the probe sends it to the secondary like
+// any other request, and the scripts, glyphs, sprite and archive then all come from whichever
+// storage answered. A 200 is not a storage failure — the server is up and ignoring Range —
+// and its body is cancelled rather than read.
 function probeOwnBasemap() {
-  var ctl = new AbortController();
-  var timer = setTimeout(function () { ctl.abort(); }, 5000);
-  return fetch(OWN_BASEMAP.archive, { headers: { Range: 'bytes=0-6' }, signal: ctl.signal })
+  return storageFetch(OWN_BASEMAP.archive, { headers: { Range: 'bytes=0-6' } })
     .then(function (r) {
-      if (r.status !== 206) { ctl.abort(); throw new Error('archive answered ' + r.status + ', not 206'); }
+      if (r.status !== 206) { discard(r); throw new Error('archive answered ' + r.status + ', not 206'); }
       return r.arrayBuffer();
     })
     .then(function (buf) {
       if (String.fromCharCode.apply(null, new Uint8Array(buf).slice(0, 7)) !== 'PMTiles') {
         throw new Error('archive does not start with the PMTiles magic');
       }
-    })
-    .finally(function () { clearTimeout(timer); });
+    });
 }
 function mountOwnBasemap() {
   if (!hasWebGL()) { fallBackFromOwnBasemap('no WebGL in this browser'); return; }
   probeOwnBasemap()
-    .then(function () { return Promise.all(OWN_BASEMAP.scripts.map(loadScript)); })
+    .then(function () {
+      return Promise.all(OWN_BASEMAP.scripts.map(function (src) { return loadScript(storageRoot() + src); }));
+    })
     .then(function () {
       var protocol = new pmtiles.Protocol();
       maplibregl.addProtocol('pmtiles', protocol.tile);
@@ -1920,7 +2002,7 @@ function fetchFillTile(key) {
   // versioned layout they are immutable at a path that names the version, which is the same
   // statement made by the storage instead of by the page.
   var dir = fillDir;
-  var p = fetch(dir + '/' + key + '.json')
+  var p = storageFetch(dir + '/' + key + '.json')
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -1986,12 +2068,12 @@ function clearFillTiles() {
 function loadFillTiles() {
   var dir = published.fills;
   Promise.all([
-    fetch(dir + '/manifest.json' + flatBust()).then(function (r) {
+    storageFetch(dir + '/manifest.json' + flatBust()).then(function (r) {
       if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }),
-    fetch(dir + '/props.json' + flatBust()).then(function (r) {
+    storageFetch(dir + '/props.json' + flatBust()).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }),
@@ -2039,7 +2121,7 @@ map.on('moveend zoomend', refreshFillTiles);
 var fullRegionsPromise = null;
 function ensureFullRegions() {
   if (!fullRegionsPromise) {
-    fullRegionsPromise = fetch(published.regions + flatBust())
+    fullRegionsPromise = storageFetch(published.regions + flatBust())
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -2086,7 +2168,7 @@ function renderStats() {
 }
 
 function loadStats() {
-  fetch(published.stats + flatBust())
+  storageFetch(published.stats + flatBust())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) { lastStats = data; renderStats(); })
     .catch(function () { lastStats = null; document.getElementById('stats-widget').style.display = 'none'; });
@@ -2106,7 +2188,7 @@ var lastHistory = null;
 var HISTORY_VISIBLE_FROM = '2026-08-07';
 
 function loadHistory() {
-  fetch(published.history + flatBust())
+  storageFetch(published.history + flatBust())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) {
       var entries = (data.entries || []).filter(function (e) { return e.date >= HISTORY_VISIBLE_FROM; });
@@ -2532,7 +2614,7 @@ var snapshotIndexPromise = null;
 function ensureSnapshotIndex() {
   if (!snapshotIndexPromise && dataLayout === 'versioned') snapshotIndexPromise = Promise.resolve(null);
   if (!snapshotIndexPromise) {
-    snapshotIndexPromise = fetch(snapshotIndexPath() + flatBust())
+    snapshotIndexPromise = storageFetch(snapshotIndexPath() + flatBust())
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (idx) { return (idx && Array.isArray(idx.dates)) ? idx : null; })
       .catch(function () { return null; });
@@ -2546,7 +2628,7 @@ function ensureSnapshotIndex() {
 var snapshotCache = { date: null, fc: null };
 function loadSnapshot(date) {
   if (snapshotCache.date === date && snapshotCache.fc) return Promise.resolve(snapshotCache.fc);
-  return fetch(snapshotPath(date) + flatBust())
+  return storageFetch(snapshotPath(date) + flatBust())
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -2665,7 +2747,7 @@ function flatBust() { return dataLayout === 'flat' ? '?_=' + Date.now() : ''; }
 // Resolves true when there is something new to load, false when there is not.
 function checkPublished() {
   if (dataLayout === 'flat') return Promise.resolve(true);
-  return fetch(VERSION_URL).then(function (r) {
+  return storageFetch(VERSION_URL).then(function (r) {
     if (r.status === 404 && dataLayout === null) {
       dataLayout = 'flat';
       published = FLAT_PATHS;
