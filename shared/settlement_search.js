@@ -225,7 +225,7 @@ window.SettlementSearch = (function () {
      reading Ukrainian. The English forms there are the OLD, Russian-derived
      transliterations — Lugansk, Kharkov, Kiev, Nikolaev — deliberately, so the dropdown
      agrees with map.html's stats panel and with the operator's own region names
-     ("Ukraine-Kharkov"). See docs/CLAUDE.md. Do not "fix" them to Luhansk/Kharkiv.
+     ("Ukraine-Kharkov"). See CLAUDE.md. Do not "fix" them to Luhansk/Kharkiv.
 
      Tolerates a plain string too: an older index paired with this module by a browser
      cache would otherwise render "undefined" under every result. */
