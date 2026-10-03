@@ -18,7 +18,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
    Leaflet's scale and attribution keep the very bottom edge; the bar stands on them
    (--bar-bottom), and what else sits low (stats, the measure readout, the phone event sheet)
    stands on the bar (--bottom-clear). Both are measured in placeBottomChrome(). */
-:root { --bar-bottom: 34px; --bottom-clear: 80px; }
+:root { --bar-bottom: 34px; --bottom-clear: 80px; --stats-bottom: 80px; }
 .card {
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 10px;
   box-shadow: 0 4px 18px rgba(0,0,0,.55);
@@ -161,8 +161,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 
 #stats-widget {
   /* Bottom-anchored, not top: growing content pushes the top edge up instead of
-     downward into the bottom bar, which it stands on. */
-  position: absolute; left: 12px; bottom: var(--bottom-clear); z-index: 900;
+     downward into the bottom bar. It shares the bar's line when the two fit side by side
+     (--stats-bottom, placeBottomChrome()), and stands on the bar when they do not: the bar
+     open across the window, or a phone. */
+  position: absolute; left: 12px; bottom: var(--stats-bottom); z-index: 900;
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
   font-size: 12px; color: #ddd; display: none; max-width: 300px;
   box-shadow: 0 6px 24px rgba(0,0,0,.6); overflow: hidden;
@@ -346,8 +348,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   #tools { top: 62px; flex-direction: column; }
   #tools .tool-group { flex-direction: column; }
   #tools .basemap-switcher, #tools #measure-menu { top: 0; left: auto !important; right: calc(100% + 9px); }
-  /* The status half keeps only the message; the count and the time are desktop detail. */
-  #count, #last-updated { display: none; }
+  /* The status half keeps only the message; the time is desktop detail. */
+  #last-updated { display: none; }
   #bar-status:has(#status-msg:empty) { display: none; }
   #history-panel.hidden:has(#status-msg:empty) { display: none; }
 }
@@ -434,7 +436,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
     <input type="date" id="history-date" title="Select a date to revert the frontline to how it looked at the end of that day"/>
     <button id="history-live" class="active" title="Return to the current frontline and the latest changes">● Today</button>
   </div>
-  <div id="bar-status"><span id="status-msg">Loading territory…</span><span id="count"></span><span id="last-updated"></span></div>
+  <div id="bar-status"><span id="status-msg">Loading territory…</span><span id="last-updated"></span></div>
   </div>
 </div>
 
@@ -562,7 +564,6 @@ var STRINGS = {
     controlAreasUnavailable: function (msg) { return 'Control areas unavailable (' + msg + ')'; },
     statsNotRefreshed: function (msg) { return 'Territory stats not refreshed (' + msg + ')'; },
     eventsNotRefreshed: function (msg) { return 'Events not refreshed (' + msg + ')'; },
-    countAreas: function (n) { return n + ' area' + (n !== 1 ? 's' : ''); },
     statsHeader: 'Percent of controlled territories',
     ruPct: function (p) { return p + '% RU'; },
     rowAreas: function (ru, ua) { return 'Russia: ' + ru + ' km² · Ukraine: ' + ua + ' km²'; },
@@ -631,7 +632,6 @@ var STRINGS = {
     controlAreasUnavailable: function (msg) { return 'Зоны контроля недоступны (' + msg + ')'; },
     statsNotRefreshed: function (msg) { return 'Статистика территории не обновлена (' + msg + ')'; },
     eventsNotRefreshed: function (msg) { return 'События не обновлены (' + msg + ')'; },
-    countAreas: function (n) { return n + ' ' + pluralRu(n, 'зона', 'зоны', 'зон'); },
     statsHeader: 'Процент контролируемых территорий',
     ruPct: function (p) { return p + '% РФ'; },
     rowAreas: function (ru, ua) { return 'Россия: ' + ru + ' км² · Украина: ' + ua + ' км²'; },
@@ -1616,13 +1616,11 @@ function report() {
     return;
   } else {
     // Silence when everything loaded (operator decision, 2026-10-03): the bar carries only
-    // what a reader needs to know — loading, a failure, a past date — plus the count and time.
+    // what a reader needs to know — loading, a failure, a past date — plus the refresh time.
     msgEl.textContent = stillLoading ? t('loadingTerritory') : '';
     msgEl.className = '';
   }
 
-  var r = counts.regions;
-  document.getElementById('count').textContent = (r === null ? '' : t('countAreas')(r));
   document.getElementById('last-updated').textContent =
     stillLoading ? '' : t('refreshed')(new Date().toLocaleTimeString());
   placeBottomChrome();
@@ -2348,6 +2346,7 @@ function renderStats() {
     statsMinimized = !statsMinimized;
     renderStats();
   });
+  placeBottomChrome();   // opened, it is wider, and may no longer fit beside the bar
 }
 
 function loadStats() {
@@ -2704,10 +2703,16 @@ function placeBottomChrome() {
   var r = document.getElementById('history-panel').getBoundingClientRect();
   var clear = r.height ? Math.round(wrap.bottom - r.top) + 8 : strip + 8;
   root.setProperty('--bottom-clear', clear + 'px');
+  // Side by side only with room between them. Neither one's left/right edge depends on which
+  // line the stats sit on, so this cannot flip back and forth.
+  var stats = document.getElementById('stats-widget').getBoundingClientRect();
+  var sideBySide = !r.height || (stats.width && stats.right + 8 <= r.left);
+  root.setProperty('--stats-bottom', (sideBySide ? strip + 6 : clear) + 'px');
 }
 var bottomObserver = new ResizeObserver(placeBottomChrome);
 bottomObserver.observe(document.getElementById('history-panel'));
 bottomObserver.observe(map.attributionControl.getContainer());
+bottomObserver.observe(document.getElementById('stats-widget'));
 window.addEventListener('resize', placeBottomChrome);
 
 // A click on the map is a click away. Not while measuring: there a click is a vertex.
