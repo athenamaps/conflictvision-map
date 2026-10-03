@@ -202,21 +202,36 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 /* Collapsed is the default state (historyCollapsed below) — the bar costs the map a strip of
    height every viewer pays for whether or not they came for the history, so it starts as
    just its own title and opens on a click. */
-#history-panel.collapsed #events-scroller,
+#history-panel.collapsed #events-strip,
 #history-panel.collapsed #history-controls { display: none; }
 #history-toggle {
   background: none; border: none; color: #bbb; font: 600 12px 'Segoe UI', sans-serif;
   cursor: pointer; padding: 4px 6px; white-space: nowrap; flex-shrink: 0;
 }
 #history-toggle:hover { color: #fff; }
+/* The row scrolls by its ‹ › buttons, the wheel or a swipe — no scrollbar (2026-10-03). The
+   bar is a strip of cards, and a native scrollbar under it read as a Windows list box. */
+/* 260px basis: on a phone the strip wraps onto a row of its own instead of being squeezed to
+   nothing between the toggle and the date controls. */
+#events-strip { flex: 1 1 260px; min-width: 0; display: flex; align-items: stretch; gap: 6px; }
 #events-scroller {
   flex: 1; min-width: 0; display: flex; gap: 8px; overflow-x: auto; padding: 2px 0;
+  scrollbar-width: none;
 }
+#events-scroller::-webkit-scrollbar { display: none; }
+.ev-arrow {
+  flex-shrink: 0; width: 26px; background: #202020; color: #ccc; border: 1px solid #333;
+  border-radius: 7px; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.ev-arrow:hover:not(:disabled) { background: #2a2a2a; color: #fff; }
+.ev-arrow:disabled { color: #3a3a3a; cursor: default; }
 .event-card {
   flex-shrink: 0; min-width: 150px; max-width: 220px; background: #202020;
   border: 1px solid #333; border-radius: 7px; padding: 6px 10px; cursor: pointer;
 }
 .event-card:hover { background: #262626; border-color: #444; }
+/* Neutral grey, never a faction colour: blue or red here would read as a claim (06-ui.md). */
+.event-card.selected { background: #2a2a2a; border-color: #9a9a9a; }
 .event-card .ec-date { font-size: 10px; color: #777; }
 .event-card .ec-name { font-size: 12px; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Coloured per gaining faction, inline from FACTIONS, rather than green-up/red-down: the
@@ -224,16 +239,48 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
    every counter shown is a gain for somebody. Contested and attack-hatch cards carry no
    counter at all and simply omit this element (see eventGainLabel()). */
 .event-card .ec-delta { font-size: 11px; font-weight: 600; }
-/* The citation behind the change — a link the operator masked behind a label, or plain text.
-   Kept to one line: the card is a scroller item, not a place to read a paragraph. */
-.event-card .ec-source { font-size: 10.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* White, never blue. On this bar blue is not "link", it is Ukraine: .ec-delta paints the
-   gaining side's faction colour one line above, so a blue citation under a contested-pocket
-   card read as a Ukrainian gain on a card that deliberately credits nobody. The link is
-   identified by hover (underline) and by the cursor, not by colour. */
-.event-card .ec-source a { color: #fff; text-decoration: none; }
-.event-card .ec-source a:hover { color: #fff; text-decoration: underline; }
-.event-card .ec-source .plain { color: #8a8a8a; }
+/* The citation is not on the card any more (2026-10-03): the card opens #event-panel, and the
+   panel carries the source. A link on a card that is itself a button was two click targets in
+   one strip of text. */
+
+/* The event panel — what one card opens. Right-hand side, under the basemap switcher; its
+   `top` is measured from the switcher in placeEventPanel(), because the switcher's height
+   changes with the language and with whether our own basemap is on offer. On a phone it is a
+   sheet along the bottom of the map instead, directly above the timeline that opened it. */
+#event-panel {
+  position: absolute; right: 10px; top: 10px; z-index: 1000; width: 280px;
+  background: #1e1e1e; border: 1px solid #333; border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.5); padding: 10px 12px 12px;
+  font-size: 12px; color: #ccc; display: none;
+  max-height: calc(100% - 20px); overflow-y: auto;
+}
+#event-panel.open { display: block; }
+#event-panel .ep-head { display: flex; align-items: flex-start; gap: 8px; }
+#event-panel .ep-date { font-size: 11px; color: #888; }
+#event-panel .ep-close {
+  margin-left: auto; background: none; border: none; color: #888; font-size: 16px;
+  line-height: 1; cursor: pointer; padding: 0 2px;
+}
+#event-panel .ep-close:hover { color: #fff; }
+#event-panel .ep-name { font-size: 13.5px; font-weight: 600; color: #eee; margin: 4px 0 3px; line-height: 1.35; }
+#event-panel .ep-delta { font-size: 12px; font-weight: 600; }
+#event-panel .ep-section {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a2a;
+}
+#event-panel .ep-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: #888; margin-bottom: 4px;
+}
+/* White, never blue — the same reason the card's citation was white: under a delta line in a
+   faction colour, a blue link reads as "Ukraine" (06-ui.md). Hover underline marks it a link. */
+#event-panel .ep-source { overflow-wrap: anywhere; line-height: 1.45; }
+#event-panel .ep-source a { color: #fff; text-decoration: none; }
+#event-panel .ep-source a:hover { text-decoration: underline; }
+#event-panel .ep-source .ep-url { display: block; font-size: 11px; color: #888; margin-top: 2px; }
+#event-panel .ep-none { color: #666; font-style: italic; }
+@media (max-width: 600px) {
+  #event-panel { top: auto !important; bottom: 10px; left: 10px; right: 10px; width: auto; max-height: 45%; }
+}
 #history-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 #history-date {
   background: #242424; color: #eee; border: 1px solid #383838; border-radius: 6px;
@@ -294,13 +341,18 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 
 <div id="map-wrap">
   <div id="map"></div>
+  <div id="event-panel" role="dialog" aria-live="polite"></div>
   <div id="measure-readout"></div>
   <div id="stats-widget"></div>
 </div>
 
 <div id="history-panel" class="hidden collapsed">
   <button id="history-toggle">Timeline ▸</button>
-  <div id="events-scroller"></div>
+  <div id="events-strip">
+    <button class="ev-arrow" id="events-prev" aria-label="Newer">&lsaquo;</button>
+    <div id="events-scroller"></div>
+    <button class="ev-arrow" id="events-next" aria-label="Older">&rsaquo;</button>
+  </div>
   <div id="history-controls">
     <input type="date" id="history-date" title="Select a date to revert the frontline to how it looked at the end of that day"/>
     <button id="history-live" class="active" title="Return to the live, current frontline">● Live</button>
@@ -380,7 +432,7 @@ if (!window.turf) {
 // changes), strict mode, and no longer the global scope. settlement_search.js stays a
 // classic script publishing `window.SettlementSearch`, which is READ below; Leaflet and turf
 // stay classic globals, which is how the modules' bodies moved across unchanged.
-import { ringAreaM2, geomAreaKm2 } from './shared/geometry.mjs';
+import { ringAreaM2, geomAreaKm2, displayDate, displayDateTime } from './shared/geometry.mjs';
 import {
   changeGeom, groupSameDayChanges, eventRepresentative, groupDelta, eventGainLabel,
   eventSourceOf,
@@ -472,6 +524,12 @@ var STRINGS = {
     factionNames: { ukraine: 'Ukraine', russia: 'Russia', contested: 'Contested', neutral: 'Neutral' },
     gainLabel: function (side, v) { return side + ' +' + v + ' km²'; },
     unnamed: 'Unnamed',
+    // The event panel a card opens, and the bar's arrows (2026-10-03).
+    eventSource: 'Source',
+    eventNoSource: 'No source given',
+    eventClose: 'Close',
+    eventsNewer: 'Newer events',
+    eventsOlder: 'Older events',
     basemapMaps: 'Maps', basemapSatellite: 'Satellite', basemapTerrain: 'Terrain',
     layerYandexMap: 'Yandex (RU)', layerGoogleRoads: 'Google Roads',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Yandex Hybrid', layerGoogleHybrid: 'Google Hybrid',
@@ -523,6 +581,11 @@ var STRINGS = {
     factionNames: { ukraine: 'Украина', russia: 'Россия', contested: 'Спорная', neutral: 'Нейтральная' },
     gainLabel: function (side, v) { return side + ' +' + v + ' км²'; },
     unnamed: 'Без названия',
+    eventSource: 'Источник',
+    eventNoSource: 'Источник не указан',
+    eventClose: 'Закрыть',
+    eventsNewer: 'Более новые события',
+    eventsOlder: 'Более старые события',
     basemapMaps: 'Карты', basemapSatellite: 'Спутник', basemapTerrain: 'Рельеф',
     layerYandexMap: 'Яндекс (рус)', layerGoogleRoads: 'Google Дороги',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Яндекс Гибрид', layerGoogleHybrid: 'Google Гибрид',
@@ -1112,6 +1175,7 @@ var basemapControlInstance = null;
 function rebuildBasemapControl() {
   if (basemapControlInstance) map.removeControl(basemapControlInstance);
   basemapControlInstance = buildBasemapControl(basemapGroups());
+  placeEventPanel();   // the event panel sits under the switcher, which may have changed height
 }
 rebuildBasemapControl();
 
@@ -1403,11 +1467,8 @@ function factionStyle(faction_id, pattern, recent) {
 
 function formatDate(iso) {
   if (!iso) return "unknown";
-  var d = new Date(iso);
-  if (isNaN(d)) return "unknown";
-  return d.toLocaleString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-  });
+  if (isNaN(new Date(iso))) return "unknown";
+  return displayDateTime(iso);
 }
 
 function factionBadge(fid) {
@@ -1523,7 +1584,10 @@ function isRecentRegion(p) {
 // The one test for "is this feature lit up as a recent change" — the fill style and the scrim
 // under it (see HIGHLIGHT_SCRIM_COLOR above) must agree exactly, or a scrim shows through
 // under an unhighlighted fill as a pale patch of nothing.
+// `_selected` marks a piece withSelectedGround() cut for the event the reader clicked; it is
+// lit by construction, through this same test, so its scrim and its fill cannot disagree.
 function isHighlighted(p, highlightIds) {
+  if (p._selected) return true;
   return highlightIds ? highlightIds.has(p.id) : isRecentRegion(p);
 }
 function paintStyle(p, highlightIds) {
@@ -1797,13 +1861,18 @@ function buildContestedEdges(features) {
   });
 }
 
+var lastRegionsRender = null;   // the past date on screen, kept so a selection can repaint it
 function renderRegionsLayer(data, highlightIds) {
+  lastRegionsRender = { data: data, ids: highlightIds };
   if (regionLayer) map.removeLayer(regionLayer);
   if (highlightScrimLayer) map.removeLayer(highlightScrimLayer);
   // Both layers draw the same post-closeGaps geometry, so the scrim lines up with the fill over
   // it to the pixel — buffering twice (or scrimming the raw shape) would leave a pale rim
   // sticking out from under the highlight.
-  var closed = closeGaps(data);
+  var closed = closeGaps({
+    type: 'FeatureCollection',
+    features: withSelectedGround(data.features || [], function (p) { return isHighlighted(p, highlightIds); }),
+  });
   highlightScrimLayer = L.geoJSON({
     type: 'FeatureCollection',
     features: (closed.features || []).filter(function (f) {
@@ -1972,6 +2041,9 @@ function renderFillTiles() {
   // insertion order — i.e. whichever tile happened to arrive first — so this sort is the only
   // thing standing between the reader and an oblast wash painted over the claims inside it.
   feats.sort(function (a, b) { return (a.properties.o || 0) - (b.properties.o || 0); });
+  // After the sort, never before it: each selected piece goes straight after its own feature,
+  // so it keeps that feature's place in the draw order and a hatch above it stays above it.
+  feats = withSelectedGround(feats, function (p) { return isHighlighted(p, null); });
 
   if (fillLayer) map.removeLayer(fillLayer);
   if (fillScrimLayer) map.removeLayer(fillScrimLayer);
@@ -2261,13 +2333,9 @@ document.getElementById('history-toggle').addEventListener('click', function () 
   historyCollapsed = !historyCollapsed;
   document.getElementById('history-panel').classList.toggle('collapsed', historyCollapsed);
   renderHistoryToggle();
-  // The scroller cannot measure its own scrollWidth while display:none, so the "newest card
-  // in view" scroll that renderEventsScroller() does is a no-op on a collapsed panel. Redo
-  // it on the way open, or the first thing an expanding viewer sees is the oldest card.
-  if (!historyCollapsed) {
-    var box = document.getElementById('events-scroller');
-    box.scrollLeft = box.scrollWidth;
-  }
+  // The newest card is the first one, so the row needs no scrolling on the way open — but the
+  // arrows cannot measure the row while it is display:none, so their state is settled here.
+  if (!historyCollapsed) updateEventArrows();
 });
 
 // ── The citation behind a change ────────────────────────────────────────────────
@@ -2288,17 +2356,18 @@ function sourceLabel(src) {
   var en = (src.label_en || '').trim();
   return ((currentLang === 'en' && en) ? en : (src.label || '')).trim();
 }
-function sourceHtml(src) {
-  if (!src) return '';
-  var label = sourceLabel(src);
-  var url = safeHttpUrl(src.url);
+// The link lives on the event panel now, never on a card (2026-10-03).
+// noopener/noreferrer because the href is operator-supplied and points off-site, and
+// target=_blank without it hands the opened page a handle back to this one. A masked link
+// shows its label only: the operator masked it on purpose, so the URL is not printed beside it.
+function sourcePanelHtml(src) {
+  var label = src ? sourceLabel(src) : '';
+  var url = src ? safeHttpUrl(src.url) : null;
   if (url) {
-    // noopener/noreferrer because the href is operator-supplied and points off-site, and
-    // target=_blank without it hands the opened page a handle back to this one.
-    return '<div class="ec-source"><a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">'
-         + esc(label || url) + '</a></div>';
+    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">'
+         + esc(label || url) + '</a>';
   }
-  return label ? '<div class="ec-source"><span class="plain">' + esc(label) + '</span></div>' : '';
+  return label ? esc(label) : '<span class="ep-none">' + esc(t('eventNoSource')) + '</span>';
 }
 
 // A card is a group of per-feature records, so the citation comes off the representative and
@@ -2315,14 +2384,193 @@ function groupBounds(group) {
   return b;
 }
 
+// ── The selected event ─────────────────────────────────────────────────────────────
+// Clicking a card selects that event: the map zooms to it, its ground lights up in the
+// "recent" shade and #event-panel opens with what the record carries. Esc, a click on the
+// map, the panel's × or the same card again clear it. Clearing removes only what the
+// selection painted — ground lit because it changed in the last 24 h stays lit.
+//
+// WHICH GROUND. The same rule highlightsForDate() applies to a past date, for the same
+// reason: a new area or a faction flip lights the shape the record carries, and an `update`
+// that kept its faction lights only `geometry − base_geometry`. Lighting the whole feature for
+// an update would say "all of this changed" about a front sector that grew by one village.
+// A `remove` lights nothing: the ground it gave up is somebody else's now, and the record
+// does not say whose.
+//
+// AND ONLY WHERE THAT FEATURE STILL HOLDS IT. Each piece is intersected with the feature as it
+// is drawn right now, so an event from last week cannot paint its faction over ground that has
+// changed hands since — that would be a claim about today the record does not make. The
+// ground is buffered by closeGaps()'s GAP_CLOSE_M first, because the fill it is cut against is
+// buffered by the same amount, and without it a thin unlit rim would run round the piece.
+//
+// A feature that is already lit is skipped, not painted twice (operator decision 2026-10-03).
+var selectedEvent = null;   // { key, item, ground: [{ id, geom, bbox }] }
+
+function eventKey(date, group) { return date + '|' + eventRepresentative(group).id; }
+
+function eventGround(item) {
+  var out = [];
+  item.group.forEach(function (c) {
+    if (c.action === 'remove' || !c.geometry) return;
+    var g = c.geometry;
+    if (c.action !== 'add' && !c.prev_faction) {
+      if (!c.base_geometry) return;   // a rename or a citation is not a territorial change
+      g = safeDifference(c.geometry, c.base_geometry);
+      if (!g || g === c.geometry) return;   // safeDifference() hands its input back on failure
+    }
+    var b = null;
+    try { b = turf.buffer(asFeature(g), GAP_CLOSE_M, { units: 'meters' }); } catch (e) { b = null; }
+    var geom = (b && b.geometry) || g;
+    out.push({ id: c.id, geom: geom, bbox: safeBbox(geom) });
+  });
+  return out;
+}
+
+// `feats` in draw order; each selected piece is inserted straight after the feature it was
+// cut from, so it inherits that feature's place in the stack (CONVENTIONS §10). `isLit` is the
+// page's own test for "already highlighted" — recent on the live view, that day's change on a
+// past one.
+function withSelectedGround(feats, isLit) {
+  if (!selectedEvent || !selectedEvent.ground.length || typeof turf === 'undefined') return feats;
+  var byId = {};
+  selectedEvent.ground.forEach(function (g) { (byId[g.id] = byId[g.id] || []).push(g); });
+  var out = [];
+  feats.forEach(function (f) {
+    out.push(f);
+    var p = f.properties || {}, gs = byId[p.id];
+    if (!gs || !f.geometry || isLit(p)) return;
+    var fb = safeBbox(f.geometry);
+    gs.forEach(function (g) {
+      if (!bboxHit(fb, g.bbox)) return;
+      var piece = safeIntersection(f.geometry, g.geom);
+      if (piece) out.push({ type: 'Feature', geometry: piece,
+                            properties: Object.assign({}, p, { _selected: true }) });
+    });
+  });
+  return out;
+}
+
+function repaintSelection() {
+  if (selectedDate) {
+    if (lastRegionsRender) renderRegionsLayer(lastRegionsRender.data, lastRegionsRender.ids);
+  } else {
+    fillRenderedSig = '';   // the tiles on screen are unchanged; what is painted on them is not
+    renderFillTiles();
+  }
+}
+
+function selectEvent(item) {
+  if (selectedEvent && selectedEvent.key === item.key) { clearEventSelection(); return; }
+  selectedEvent = { key: item.key, item: item, ground: eventGround(item) };
+  markSelectedCard();
+  renderEventPanel();
+  repaintSelection();
+  var b = groupBounds(item.group);
+  if (b && b.isValid()) {
+    // Keep the ground clear of the panel: beside it on a wide screen, above it on a phone.
+    var panel = document.getElementById('event-panel');
+    var narrow = window.matchMedia('(max-width: 600px)').matches;
+    map.fitBounds(b, { maxZoom: 12, paddingBottomRight: narrow ? [0, panel.offsetHeight + 10]
+                                                               : [panel.offsetWidth + 20, 0] });
+  }
+}
+
+function clearEventSelection() {
+  if (!selectedEvent) return;
+  selectedEvent = null;
+  markSelectedCard();
+  renderEventPanel();
+  repaintSelection();
+}
+
+function markSelectedCard() {
+  var key = selectedEvent && selectedEvent.key;
+  document.querySelectorAll('#events-scroller .event-card').forEach(function (el) {
+    el.classList.toggle('selected', el.dataset.key === key);
+  });
+}
+
+function renderEventPanel() {
+  var box = document.getElementById('event-panel');
+  if (!selectedEvent) { box.classList.remove('open'); box.innerHTML = ''; return; }
+  var item = selectedEvent.item;
+  var rep = eventRepresentative(item.group);
+  var gain = eventGainLabel(rep, groupDelta(item.group), livePatternOf, mapGainText);
+  var displayName = (currentLang === 'en' && rep.name_en) ? rep.name_en : rep.name;
+  box.innerHTML = '<div class="ep-head"><div class="ep-date">' + esc(displayDate(item.date)) + '</div>'
+    + '<button class="ep-close" title="' + esc(t('eventClose')) + '" aria-label="' + esc(t('eventClose')) + '">×</button></div>'
+    + '<div class="ep-name">' + esc(displayName || t('unnamed')) + '</div>'
+    + (gain
+        ? '<div class="ep-delta" style="color:' + ((FACTIONS[gain.side] || {}).color || '#888')
+          + '">' + esc(gain.text) + '</div>'
+        : '')
+    + '<div class="ep-section"><div class="ep-label">' + esc(t('eventSource')) + '</div>'
+    + '<div class="ep-source">' + sourcePanelHtml(eventSourceOf(item.group)) + '</div></div>';
+  box.querySelector('.ep-close').addEventListener('click', clearEventSelection);
+  box.classList.add('open');
+  placeEventPanel();
+}
+
+// Under the basemap switcher, whose height is not fixed — it is rebuilt in the other language,
+// and gains a row when our own basemap is on offer. Measured, not assumed. A phone ignores
+// `top` (the sheet is bottom-anchored in CSS).
+function placeEventPanel() {
+  var box = document.getElementById('event-panel');
+  if (!box || !box.classList.contains('open')) return;
+  var sw = document.querySelector('.basemap-switcher');
+  var wrap = document.getElementById('map-wrap');
+  var top = sw ? Math.round(sw.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top) + 10 : 10;
+  box.style.top = top + 'px';
+  box.style.maxHeight = 'calc(100% - ' + (top + 10) + 'px)';
+}
+window.addEventListener('resize', function () { placeEventPanel(); updateEventArrows(); });
+
+// A click on the map is a click away. Not while measuring: there a click is a vertex.
+map.on('click', function () {
+  if (measureMode === 'drawing') return;
+  clearEventSelection();
+});
+
+// ── The bar's arrows ──────────────────────────────────────────────────────────────
+// ‹ is newer and › older, because the newest card is on the left. Each press moves most of a
+// row so the last card of one page is still in view on the next. The wheel scrolls the row
+// sideways, since without a scrollbar a mouse has no other way along it.
+function updateEventArrows() {
+  var box = document.getElementById('events-scroller');
+  var max = box.scrollWidth - box.clientWidth;
+  document.getElementById('events-prev').disabled = box.scrollLeft <= 1;
+  document.getElementById('events-next').disabled = box.scrollLeft >= max - 1;
+}
+(function () {
+  var box = document.getElementById('events-scroller');
+  function page(dir) { box.scrollBy({ left: dir * Math.max(120, box.clientWidth * 0.8), behavior: 'smooth' }); }
+  document.getElementById('events-prev').addEventListener('click', function () { page(-1); });
+  document.getElementById('events-next').addEventListener('click', function () { page(1); });
+  box.addEventListener('scroll', updateEventArrows, { passive: true });
+  box.addEventListener('wheel', function (e) {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // a trackpad already scrolls sideways
+    box.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+})();
+
 function renderEventsScroller() {
   var box = document.getElementById('events-scroller');
-  if (!lastHistory || !lastHistory.entries.length) { box.innerHTML = ''; return; }
-  // Flattened across all days, oldest first — the most recent event is the last card.
+  if (!lastHistory || !lastHistory.entries.length) {
+    box.innerHTML = ''; clearEventSelection(); updateEventArrows(); return;
+  }
+  // Flattened across all days, NEWEST FIRST (2026-10-03): the most recent event is the first
+  // card, on the left, where the row starts. Within a day the groups are reversed too —
+  // later in a day's `changes` is later in the day (see eventRepresentative()).
   var cards = [];
-  lastHistory.entries.forEach(function (e) {
-    groupSameDayChanges(e.changes).forEach(function (g) { cards.push({ date: e.date, group: g }); });
-  });
+  lastHistory.entries.slice()
+    .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; })
+    .forEach(function (e) {
+      groupSameDayChanges(e.changes).reverse().forEach(function (g) {
+        cards.push({ date: e.date, group: g, key: eventKey(e.date, g) });
+      });
+    });
+  var keepScroll = box.scrollLeft;   // a re-render (poll, language) must not throw the reader back
   box.innerHTML = '';
   cards.forEach(function (item) {
     var rep = eventRepresentative(item.group);
@@ -2332,25 +2580,30 @@ function renderEventsScroller() {
     var displayName = (currentLang === 'en' && rep.name_en) ? rep.name_en : rep.name;
     var el = document.createElement('div');
     el.className = 'event-card';
-    el.innerHTML = '<div class="ec-date">' + item.date + '</div>'
+    el.dataset.key = item.key;
+    el.innerHTML = '<div class="ec-date">' + esc(displayDate(item.date)) + '</div>'
       + '<div class="ec-name">' + esc(displayName || t('unnamed')) + '</div>'
       + (gain
           ? '<div class="ec-delta" style="color:' + ((FACTIONS[gain.side] || {}).color || '#888')
             + '">' + esc(gain.text) + '</div>'
-          : '')
-      + sourceHtml(eventSourceOf(item.group));
-    el.addEventListener('click', function (ev) {
-      // The whole card zooms the map, but the source link inside it has to open the source —
-      // without this the click bubbles and does both at once.
-      if (ev.target.closest && ev.target.closest('.ec-source a')) return;
-      var b = groupBounds(item.group);
-      if (b && b.isValid()) map.fitBounds(b, { maxZoom: 12 });
-    });
+          : '');
+    el.addEventListener('click', function () { selectEvent(item); });
     box.appendChild(el);
   });
-  box.scrollLeft = box.scrollWidth; // most recent (last) card starts in view
-}
-function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  box.scrollLeft = keepScroll;
+  // The selection survives a re-render if its event is still on the bar, re-read from the
+  // fresh records; an event that dropped out of the retention window takes the panel with it.
+  if (selectedEvent) {
+    var still = cards.filter(function (c) { return c.key === selectedEvent.key; })[0];
+    if (still) {
+      selectedEvent = { key: still.key, item: still, ground: eventGround(still) };
+      markSelectedCard();
+      renderEventPanel();
+      repaintSelection();
+    } else clearEventSelection();
+  }
+  updateEventArrows();
+}function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
 // ── Reverse replay: turf helpers ──────────────────────────────────────────────────
 // Bare-geometry wrappers, because everything below works in geometries (that is what the
@@ -2373,6 +2626,11 @@ function safeIntersectArea(a, b) {
   if (typeof turf === 'undefined' || !a || !b) return 0;
   try { var i = turf.intersect(asFeature(a), asFeature(b)); return i ? turf.area(i) : 0; }
   catch (e) { return 0; }
+}
+function safeIntersection(a, b) {
+  if (typeof turf === 'undefined' || !a || !b) return null;
+  try { var i = turf.intersect(asFeature(a), asFeature(b)); return (i && i.geometry) || null; }
+  catch (e) { return null; }
 }
 function safeBbox(g) { try { return turf.bbox(g); } catch (e) { return null; } }
 function bboxHit(a, b) {
@@ -2666,7 +2924,7 @@ function showHistoricalDate(targetDate) {
   document.getElementById('history-live').classList.remove('active');
   document.getElementById('history-live').disabled = false;
   var msgEl = document.getElementById('status-msg');
-  msgEl.textContent = t('showingAsOf')(targetDate);
+  msgEl.textContent = t('showingAsOf')(displayDate(targetDate));
   msgEl.className = '';
 
   ensureSnapshotIndex().then(function (idx) {
@@ -2684,8 +2942,8 @@ function showHistoricalDate(targetDate) {
     if (!out || selectedDate !== targetDate) return;
     renderRegionsLayer(out.result.regions, out.result.changedIds);
     msgEl.textContent = out.shown === targetDate
-      ? t('showingAsOf')(targetDate)
-      : t('showingNearest')(out.shown, targetDate);
+      ? t('showingAsOf')(displayDate(targetDate))
+      : t('showingNearest')(displayDate(out.shown), displayDate(targetDate));
     msgEl.className = '';
   }).catch(function (err) {
     if (selectedDate !== targetDate) return;
@@ -2700,6 +2958,7 @@ function showLive() {
   // Drop the reconstructed full-file layers and hand the live view back to the tiles.
   if (regionLayer) { map.removeLayer(regionLayer); regionLayer = null; }
   if (highlightScrimLayer) { map.removeLayer(highlightScrimLayer); highlightScrimLayer = null; }
+  lastRegionsRender = null;
   contestedEdgeGroup.clearLayers();
   refreshFillTiles();
   report();
@@ -3259,6 +3518,12 @@ document.addEventListener('keydown', function (e) {
   // typed into an input is never a measure-tool shortcut.
   var tag = (e.target && e.target.tagName) || '';
   if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+  // Esc belongs to whatever is open nearest the reader: an open menu or a measurement in
+  // progress first, the selected event after them.
+  if (e.key === 'Escape' && selectedEvent && measureMode !== 'drawing' && !measureMenuOpen) {
+    clearEventSelection();
+    return;
+  }
   if (measureMode !== 'drawing') {
     if (e.key === 'Escape' && measureMenuOpen) setMeasureMenuOpen(false);
     return;
@@ -3317,6 +3582,8 @@ function renderStaticChrome() {
   var liveBtn = document.getElementById('history-live');
   liveBtn.textContent = t('live');
   liveBtn.title = t('liveTitle');
+  document.getElementById('events-prev').title = t('eventsNewer');
+  document.getElementById('events-next').title = t('eventsOlder');
   renderHistoryToggle();
 }
 function setLanguage(lang) {
@@ -3331,6 +3598,7 @@ function setLanguage(lang) {
   // reader who chose a layer keeps it. buildBasemapControl() reads activeBasemap fresh, which
   // is what preserves the selection across this rebuild.
   rebuildBasemapControl();
+  renderEventPanel();   // its text, and its place under the switcher just rebuilt
   // Our own basemap is the one layer whose labels are ours to set, so it re-labels in place
   // rather than switching layers — the same map, its place names in the reader's language.
   // setStyle diffs against the current style, so only the text-field expressions change and
@@ -3346,7 +3614,7 @@ function setLanguage(lang) {
   // but the names themselves are never translated (CONVENTIONS.md §6).
   if (settlementSearch) settlementSearch.setLang(currentLang);
   if (selectedDate) {
-    document.getElementById('status-msg').textContent = t('showingAsOf')(selectedDate);
+    document.getElementById('status-msg').textContent = t('showingAsOf')(displayDate(selectedDate));
   }
 }
 document.getElementById('tool-lang').addEventListener('click', function () {

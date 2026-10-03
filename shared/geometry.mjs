@@ -24,6 +24,28 @@
 function nowIso()    { return new Date().toISOString().replace(/\.\d+Z$/, 'Z'); }
 function round3(x)   { return Math.round(x * 1000) / 1000; }
 
+// Every date a person reads, on either page, is day.month.year with the full year: 31.12.2026
+// (operator decision, 2026-10-03). Display only — files, snapshot names, entry keys and the
+// date inputs' values all stay ISO. A bare YYYY-MM-DD is reordered as text, never parsed: it
+// names a calendar day, and `new Date('2026-10-03')` is UTC midnight, which is the 2nd west
+// of Greenwich. A timestamp is shown in the reader's local time. Anything unparseable comes
+// back as it went in, so a malformed value is still visible rather than turned into "NaN".
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function displayDate(s) {
+  if (!s) return '';
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return m[3] + '.' + m[2] + '.' + m[1];
+  var d = new Date(s);
+  if (isNaN(d)) return String(s);
+  return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
+}
+function displayDateTime(s) {
+  if (!s) return '';
+  var d = new Date(s);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(d)) return displayDate(s);
+  return displayDate(s) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
 // Spherical geodesic area (same formula as turf/geojson-area), returns km²
 function ringAreaM2(coords) {
   var R = 6378137, total = 0, len = coords.length;
@@ -187,7 +209,7 @@ function kinkCount(geom) {
 }
 
 export {
-  nowIso, round3,
+  nowIso, round3, displayDate, displayDateTime,
   ringAreaM2, geomAreaKm2,
   SNAP_DP, SNAP_SCALE, snapNum, snapRing, snapGeom, snapGuarded, snapDeep,
   kinkCount,
