@@ -6,24 +6,65 @@
 <title>Conflict Map</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: #eee; height: 100vh; overflow: hidden; }
 
-#toolbar {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 9px 14px; background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
-  /* Above Leaflet's own controls, which sit at 1000. This used to tie with them, and #map-wrap
-     is positioned with z-index:auto so it opens no stacking context of its own — the controls
-     compete here directly and, coming later in the DOM, won. Nothing showed it until something
-     in the toolbar hung down over the map: at a phone width the basemap switcher painted over
-     the measure menu. The search dropdown has the same shape and the same fix. */
-  z-index: 1100; flex-shrink: 0;
+/* ── Floating chrome (2026-10-03) ─────────────────────────────────────────────────
+   No toolbar and no status bar: the map takes the whole window and everything else floats on
+   it as small cards, grouped the way Yandex Maps groups them — the logo top-left, the search
+   top-centre, two tool groups top-right (map tools; page/language), zoom on the right edge,
+   and ONE bar at the bottom centre holding the timeline and every status/update line.
+   All of it sits in #map-wrap but outside #map, so a click or a wheel on a card never reaches
+   Leaflet, and it stacks above Leaflet's own controls (1000) by coming later in the DOM.
+   Leaflet's scale and attribution keep the very bottom edge; the bar stands on them
+   (--bar-bottom), and what else sits low (stats, the measure readout, the phone event sheet)
+   stands on the bar (--bottom-clear). Both are measured in placeBottomChrome(). */
+:root { --bar-bottom: 34px; --bottom-clear: 80px; }
+.card {
+  background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0,0,0,.55);
 }
-#toolbar h1 { font-size: 13px; font-weight: 600; color: #bbb; letter-spacing: .06em; }
-#toolbar h1 .app-mark {
-  /* The mark is black-on-white artwork; on the dark toolbar it takes the title's own
+#logo-card { position: absolute; left: 12px; top: 12px; z-index: 1000; padding: 7px 12px; }
+#logo-card h1 { font-size: 13px; font-weight: 600; color: #bbb; letter-spacing: .06em; white-space: nowrap; line-height: 22px; }
+#logo-card h1 .app-mark {
+  /* The mark is black-on-white artwork; on the dark card it takes the title's own
      colour instead, which is the same design inverted. */
-  width: 21.5px; height: 24px; vertical-align: -.54em; margin-right: 5px; fill: currentColor;
+  width: 19.5px; height: 22px; vertical-align: -6px; margin-right: 6px; fill: currentColor;
 }
+/* Wide enough to type a village name into, and never reaching under the logo or the tools:
+   380px is the two side blocks plus their gaps, measured at their widest. */
+#search-card {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1050;
+  width: min(400px, calc(100% - 380px));
+}
+#search-card .ss-wrap { display: flex; width: 100%; }
+#search-card .ss-input {
+  width: 100%; height: 38px; font-size: 13px; padding: 0 12px 0 32px;
+  background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 10px; color: #ddd;
+  box-shadow: 0 4px 18px rgba(0,0,0,.55);
+}
+#search-card .ss-input:focus { background: #1f1f1f; }
+#search-card .ss-icon { left: 12px; font-size: 13px; }
+#search-card .ss-drop { left: 0; right: 0; min-width: 0; max-width: none; }
+#tools {
+  position: absolute; top: 12px; right: 12px; z-index: 1100;
+  display: flex; gap: 8px; align-items: flex-start;
+}
+.tool-group { display: flex; padding: 3px; gap: 2px; }
+.tbtn {
+  width: 34px; height: 30px; border: none; border-radius: 7px; background: none; color: #ccc;
+  font: 600 12px 'Segoe UI', system-ui, sans-serif; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.tbtn.icon { font-size: 16px; font-weight: 400; }
+.tbtn:hover { background: #2a2a2a; color: #fff; }
+.tbtn.active { background: #1d4ed8; color: #fff; }
+.pop-wrap { position: relative; display: inline-flex; }
+#zoom-group {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%); z-index: 1000;
+  flex-direction: column;
+}
+#zoom-group .tbtn { font-size: 19px; font-weight: 400; height: 34px; }
+#zoom-group .tbtn:disabled { color: #4a4a4a; background: none; cursor: default; }
 .tool {
   font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
   background: #242424; color: #ccc; border: 1px solid #383838;
@@ -32,11 +73,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 .tool.active { background: #1d4ed8; border-color: #2563eb; color: #fff; }
 #map.measuring { cursor: crosshair; }
 
-/* Measure tool. The button is a menu trigger, so the panel is positioned against a
-   wrapper rather than the toolbar — the toolbar wraps at narrow widths and an
-   absolutely-positioned panel anchored to the bar itself would part company with its
-   button on the second row. */
-#measure-wrap { position: relative; display: inline-flex; }
+/* Measure tool. The button is a menu trigger, so the panel is positioned against the
+   button's own wrapper (.pop-wrap) and nudged back on screen by nudgeIntoView(). */
 #measure-menu {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 1200; min-width: 244px;
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
@@ -62,7 +100,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 #measure-menu .mm-sep { border-top: 1px solid #2a2a2a; margin: 6px -12px 4px; }
 
 #measure-readout {
-  position: absolute; right: 12px; bottom: 12px; z-index: 900;
+  position: absolute; right: 12px; bottom: var(--bottom-clear); z-index: 900;
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
   padding: 9px 12px; font-size: 12px; color: #ddd; display: none;
   box-shadow: 0 6px 24px rgba(0,0,0,.6);
@@ -123,9 +161,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 
 #stats-widget {
   /* Bottom-anchored, not top: growing content pushes the top edge up instead of
-     downward into the timeline bar below the map. left offset clears the scale control
-     (also bottom-left) which sits underneath it. */
-  position: absolute; left: 12px; bottom: 48px; z-index: 900;
+     downward into the bottom bar, which it stands on. */
+  position: absolute; left: 12px; bottom: var(--bottom-clear); z-index: 900;
   background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
   font-size: 12px; color: #ddd; display: none; max-width: 300px;
   box-shadow: 0 6px 24px rgba(0,0,0,.6); overflow: hidden;
@@ -142,18 +179,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 #stats-widget .stats-row:last-child { border-bottom: none; }
 #stats-widget .stats-row-top { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: #bbb; }
 #stats-widget .stats-row-areas { font-size: 10.5px; color: #888; margin-top: 2px; }
-#last-updated { margin-left: auto; font-size: 11px; color: #555; }
-
-#map-wrap { flex: 1; min-height: 0; position: relative; }
+#map-wrap { position: fixed; inset: 0; }
 #map { position: absolute; inset: 0; }
-
-#statusbar {
-  padding: 5px 14px; font-size: 11px; color: #555;
-  background: #161616; border-top: 1px solid #222;
-  display: flex; gap: 16px; align-items: center; flex-shrink: 0;
-}
-#count { margin-left: auto; }
-#status-msg.err { color: #b45c5c; }
 
 .zone-popup { font-family: 'Segoe UI', sans-serif; min-width: 200px; }
 .zone-popup h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #eee; }
@@ -176,6 +203,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 .leaflet-bar a:hover { background: #2a2a2a !important; }
 
 .basemap-switcher {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 1200; min-width: 180px;
+  display: none;
   background: #1e1e1e; border: 1px solid #333; border-radius: 8px;
   padding: 6px 10px 8px; font-size: 12px; color: #ccc; max-height: 340px; overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0,0,0,.5);
@@ -187,6 +216,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 .basemap-switcher .bs-group-title:first-child { margin-top: -6px; }
 .basemap-switcher .bs-row { display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 2px; cursor: pointer; white-space: nowrap; }
 .basemap-switcher .bs-row input { margin: 0; }
+.basemap-switcher.open { display: block; }
 .leaflet-control-scale-line {
   background: rgba(20,20,20,.85) !important; color: #ddd !important;
   border-color: #666 !important; font-size: 11px !important;
@@ -194,14 +224,37 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 .leaflet-control-attribution { background: rgba(20,20,20,.8) !important; color: #777 !important; }
 .leaflet-control-attribution a { color: #999 !important; }
 
+/* The one bar at the bottom: the timeline and the status line (errors, "Loading territory…",
+   "Showing as of …", the area count and the refresh time; nothing at all when territory
+   loaded fine). Collapsed it is a small card in the bottom centre, as wide as what it says;
+   open it spans the window, as the old bar did. `.hidden` means history has not loaded — the
+   timeline half goes, the status half stays. */
 #history-panel {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 8px 14px; background: #1a1a1a; border-top: 1px solid #2a2a2a; flex-shrink: 0;
+  position: absolute; bottom: var(--bar-bottom); left: 50%; transform: translateX(-50%); z-index: 1000;
+  max-width: calc(100% - 24px);
+  display: flex; align-items: center; gap: 10px; padding: 4px 10px 4px 6px;
 }
-#history-panel.hidden { display: none; }
-/* Collapsed is the default state (historyCollapsed below) — the bar costs the map a strip of
-   height every viewer pays for whether or not they came for the history, so it starts as
-   just its own title and opens on a click. */
+#history-panel:not(.collapsed):not(.hidden) {
+  left: 12px; right: 12px; transform: none; max-width: none; flex-wrap: wrap; padding: 6px 10px;
+}
+#history-panel.hidden #history-toggle,
+#history-panel.hidden #events-strip,
+#history-panel.hidden #history-controls { display: none; }
+#history-panel.hidden { padding: 6px 10px; }
+/* History never loaded and nothing to report: no bar at all, not an empty card. */
+#history-panel.hidden:not(:has(#bar-status span:not(:empty))) { display: none; }
+#bar-status {
+  min-width: 0; display: flex; font-size: 11.5px; color: #888; white-space: nowrap;
+}
+#history-panel:not(.hidden) #bar-status { border-left: 1px solid #333; padding-left: 10px; }
+#bar-status span:empty { display: none; }
+#bar-status span:not(:empty) ~ span:not(:empty)::before { content: '·'; margin: 0 6px; color: #555; }
+#bar-status:not(:has(span:not(:empty))) { display: none; }
+#status-msg { overflow: hidden; text-overflow: ellipsis; }
+#status-msg.err { color: #d98080; }
+/* Collapsed is the default state (historyCollapsed below) — the cards cost the map a strip of
+   height every viewer pays for whether or not they came for the history, so the bar starts as
+   just its title and the day it is on, and opens on a click. */
 #history-panel.collapsed #events-strip,
 #history-panel.collapsed #history-controls { display: none; }
 #history-toggle {
@@ -244,12 +297,12 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
    panel carries the source. A link on a card that is itself a button was two click targets in
    one strip of text. */
 
-/* The event panel — what one card opens. Right-hand side, under the basemap switcher; its
-   `top` is measured from the switcher in placeEventPanel(), because the switcher's height
-   changes with the language and with whether our own basemap is on offer. On a phone it is a
-   sheet along the bottom of the map instead, directly above the timeline that opened it. */
+/* The event panel — what one card opens. Right-hand side, under the tool groups (its `top` is
+   measured from them in placeEventPanel()), and clear of the zoom buttons on the right edge.
+   On a phone it is a sheet along the bottom of the map instead, directly above the bar that
+   opened it. */
 #event-panel {
-  position: absolute; right: 10px; top: 10px; z-index: 1000; width: 280px;
+  position: absolute; right: 58px; top: 58px; z-index: 1000; width: 280px;
   background: #1e1e1e; border: 1px solid #333; border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0,0,0,.5); padding: 10px 12px 12px;
   font-size: 12px; color: #ccc; display: none;
@@ -280,7 +333,23 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 #event-panel .ep-source .ep-url { display: block; font-size: 11px; color: #888; margin-top: 2px; }
 #event-panel .ep-none { color: #666; font-style: italic; }
 @media (max-width: 600px) {
-  #event-panel { top: auto !important; bottom: 10px; left: 10px; right: 10px; width: auto; max-height: 45%; }
+  #event-panel {
+    top: auto !important; bottom: var(--bottom-clear); left: 12px; right: 12px; width: auto;
+    max-height: 45% !important;
+  }
+  /* Phone: the logo is the mark alone, the search takes the rest of the top row, and the tool
+     groups stack down the right edge under it, their menus opening to the left. */
+  #logo-card { padding: 7px 9px; }
+  #logo-card .app-title-text { display: none; }
+  #logo-card h1 .app-mark { margin-right: 0; }
+  #search-card { left: 64px; right: 12px; width: auto; transform: none; }
+  #tools { top: 62px; flex-direction: column; }
+  #tools .tool-group { flex-direction: column; }
+  #tools .basemap-switcher, #tools #measure-menu { top: 0; left: auto !important; right: calc(100% + 9px); }
+  /* The status half keeps only the message; the count and the time are desktop detail. */
+  #count, #last-updated { display: none; }
+  #bar-status:has(#status-msg:empty) { display: none; }
+  #history-panel.hidden:has(#status-msg:empty) { display: none; }
 }
 #history-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 #history-date {
@@ -327,27 +396,34 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
 </head>
 <body>
 
-<div id="toolbar">
-  <h1 id="app-title"><svg class="app-mark" viewBox="-1 -1 102 114" aria-hidden="true" focusable="false"><g fill="currentColor"><g transform="translate(40 80.15) rotate(36.3)"><path d="M -49.6 0 C -44 -1.2 -36 -3.4 -30 -5.2 C -27.5 -6 -26 -4.5 -25.6 -2.2 L -25.6 2.2 C -26 4.5 -27.5 6 -30 5.2 C -36 3.4 -44 1.2 -49.6 0 Z"/><rect x="-24.4" y="-3.9" width="3.2" height="7.8" rx="1"/><rect x="-20.5" y="-2.75" width="63" height="5.5" rx="1.4"/><rect x="42.5" y="-3.6" width="3" height="7.2" rx="1"/><rect x="46.6" y="-3.5" width="3" height="7" rx="1.5"/></g><g transform="translate(60 80.15) rotate(143.7)"><path d="M -49.6 0 C -44 -1.2 -36 -3.4 -30 -5.2 C -27.5 -6 -26 -4.5 -25.6 -2.2 L -25.6 2.2 C -26 4.5 -27.5 6 -30 5.2 C -36 3.4 -44 1.2 -49.6 0 Z"/><rect x="-24.4" y="-3.9" width="3.2" height="7.8" rx="1"/><rect x="-20.5" y="-2.75" width="63" height="5.5" rx="1.4"/><rect x="42.5" y="-3.6" width="3" height="7.2" rx="1"/><rect x="46.6" y="-3.5" width="3" height="7" rx="1.5"/></g><path d="M 33 32 C 35.5 18.5 43 6 53.5 .8 C 61 -2.5 68.2 2 68.9 9.5 L 67.3 29 C 65 16 57 11.5 49 15 C 44 14 37.5 21.5 33 32 Z"/><path fill-rule="evenodd" d="M 50.75 17 C 41 17 33 25.5 33 37 L 33 45 C 33 58 36 66.5 40.5 71 L 46 52.5 L 50.75 62 L 55.5 52.5 L 61 71 C 65.5 66.5 68.5 58 68.5 45 L 68.5 37 C 68.5 25.5 60.5 17 50.75 17 Z M 35.2 40 L 46 44.5 L 46 48.5 L 38.5 46.5 C 35.8 45.6 35 42 35.2 40 Z M 66.3 40 L 55.5 44.5 L 55.5 48.5 L 63 46.5 C 65.7 45.6 66.5 42 66.3 40 Z"/></g></svg>CONFLICT MAP</h1>
-  <span id="measure-wrap">
-    <button class="tool" id="tool-measure" aria-haspopup="true" aria-expanded="false"
-            title="Measure a distance or an area on the map">📐 Measure</button>
-    <div id="measure-menu" role="menu"></div>
-  </span>
-  <span id="search-slot"></span>
-  <button class="tool" id="tool-lang" title="Switch language">RU</button>
-  <button class="tool" id="tool-methodology" title="How this map is made" style="display:none">&#9432; Methodology</button>
-  <span id="last-updated">Loading…</span>
-</div>
-
 <div id="map-wrap">
   <div id="map"></div>
+  <div id="logo-card" class="card"><h1 id="app-title"><svg class="app-mark" viewBox="-1 -1 102 114" aria-hidden="true" focusable="false"><g fill="currentColor"><g transform="translate(40 80.15) rotate(36.3)"><path d="M -49.6 0 C -44 -1.2 -36 -3.4 -30 -5.2 C -27.5 -6 -26 -4.5 -25.6 -2.2 L -25.6 2.2 C -26 4.5 -27.5 6 -30 5.2 C -36 3.4 -44 1.2 -49.6 0 Z"/><rect x="-24.4" y="-3.9" width="3.2" height="7.8" rx="1"/><rect x="-20.5" y="-2.75" width="63" height="5.5" rx="1.4"/><rect x="42.5" y="-3.6" width="3" height="7.2" rx="1"/><rect x="46.6" y="-3.5" width="3" height="7" rx="1.5"/></g><g transform="translate(60 80.15) rotate(143.7)"><path d="M -49.6 0 C -44 -1.2 -36 -3.4 -30 -5.2 C -27.5 -6 -26 -4.5 -25.6 -2.2 L -25.6 2.2 C -26 4.5 -27.5 6 -30 5.2 C -36 3.4 -44 1.2 -49.6 0 Z"/><rect x="-24.4" y="-3.9" width="3.2" height="7.8" rx="1"/><rect x="-20.5" y="-2.75" width="63" height="5.5" rx="1.4"/><rect x="42.5" y="-3.6" width="3" height="7.2" rx="1"/><rect x="46.6" y="-3.5" width="3" height="7" rx="1.5"/></g><path d="M 33 32 C 35.5 18.5 43 6 53.5 .8 C 61 -2.5 68.2 2 68.9 9.5 L 67.3 29 C 65 16 57 11.5 49 15 C 44 14 37.5 21.5 33 32 Z"/><path fill-rule="evenodd" d="M 50.75 17 C 41 17 33 25.5 33 37 L 33 45 C 33 58 36 66.5 40.5 71 L 46 52.5 L 50.75 62 L 55.5 52.5 L 61 71 C 65.5 66.5 68.5 58 68.5 45 L 68.5 37 C 68.5 25.5 60.5 17 50.75 17 Z M 35.2 40 L 46 44.5 L 46 48.5 L 38.5 46.5 C 35.8 45.6 35 42 35.2 40 Z M 66.3 40 L 55.5 44.5 L 55.5 48.5 L 63 46.5 C 65.7 45.6 66.5 42 66.3 40 Z"/></g></svg><span class="app-title-text">CONFLICT MAP</span></h1></div>
+  <div id="search-card"><span id="search-slot"></span></div>
+  <div id="tools">
+    <div class="tool-group card">
+      <span class="pop-wrap" id="basemap-wrap">
+        <button class="tbtn icon" id="tool-basemap" aria-haspopup="true" aria-expanded="false">&#128506;</button>
+        <div class="basemap-switcher" id="basemap-pop"></div>
+      </span>
+      <span class="pop-wrap" id="measure-wrap">
+        <button class="tbtn icon" id="tool-measure" aria-haspopup="true" aria-expanded="false">&#128208;</button>
+        <div id="measure-menu" role="menu"></div>
+      </span>
+    </div>
+    <div class="tool-group card">
+      <button class="tbtn icon" id="tool-methodology" style="display:none">&#9432;</button>
+      <button class="tbtn" id="tool-lang">RU</button>
+    </div>
+  </div>
+  <div id="zoom-group" class="tool-group card">
+    <button class="tbtn" id="zoom-in">+</button>
+    <button class="tbtn" id="zoom-out">&minus;</button>
+  </div>
   <div id="event-panel" role="dialog" aria-live="polite"></div>
   <div id="measure-readout"></div>
   <div id="stats-widget"></div>
-</div>
-
-<div id="history-panel" class="hidden collapsed">
+  <div id="history-panel" class="card hidden collapsed">
   <button id="history-toggle">Timeline ▸</button>
   <div id="events-strip">
     <button class="ev-arrow" id="events-prev" aria-label="Newer">&lsaquo;</button>
@@ -358,16 +434,14 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
     <input type="date" id="history-date" title="Select a date to revert the frontline to how it looked at the end of that day"/>
     <button id="history-live" class="active" title="Return to the current frontline and the latest changes">● Today</button>
   </div>
+  <div id="bar-status"><span id="status-msg">Loading territory…</span><span id="count"></span><span id="last-updated"></span></div>
+  </div>
 </div>
 
 <div id="methodology-overlay">
   <div id="methodology" role="dialog" aria-modal="true" aria-labelledby="methodology-title"></div>
 </div>
 
-<div id="statusbar">
-  <span id="status-msg">Loading territory…</span>
-  <span id="count"></span>
-</div>
 
 <!-- Vendored, pinned by version AND by hash (Stage 13, then Stage 21.4). The three files
      under lib/ are byte-for-byte the CDN files Stage 13 hashed, taken from the URLs below;
@@ -471,7 +545,6 @@ function pluralRu(n, one, few, many) {
 }
 var STRINGS = {
   en: {
-    measure: '📐 Measure',
     measureTitle: 'Measure a distance or an area on the map',
     measureMenuTitle: 'Distance and area measurement',
     measureStart: 'Start measuring',
@@ -479,14 +552,16 @@ var STRINGS = {
     measureCancel: 'Cancel',
     measureClearAll: function (n) { return 'Delete all measurements (' + n + ')'; },
     measureClearAllConfirm: function (n) { return 'Delete all ' + n + ' — click again to confirm'; },
-    methodology: 'ⓘ Methodology',
+    basemapTitle: 'Map layers',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
     methodologyTitle: 'Where the data comes from, how a claim is checked, how errors are corrected',
     langToggleTitle: 'Switch to Russian',
-    loading: 'Loading…',
     refreshed: function (time) { return 'Refreshed ' + time; },
     loadingTerritory: 'Loading territory…',
-    territoryLoaded: 'Territory loaded',
     controlAreasUnavailable: function (msg) { return 'Control areas unavailable (' + msg + ')'; },
+    statsNotRefreshed: function (msg) { return 'Territory stats not refreshed (' + msg + ')'; },
+    eventsNotRefreshed: function (msg) { return 'Events not refreshed (' + msg + ')'; },
     countAreas: function (n) { return n + ' area' + (n !== 1 ? 's' : ''); },
     statsHeader: 'Percent of controlled territories',
     ruPct: function (p) { return p + '% RU'; },
@@ -539,7 +614,6 @@ var STRINGS = {
     layerOpenTopo: 'OpenTopoMap',
   },
   ru: {
-    measure: '📐 Измерить',
     measureTitle: 'Измерение расстояний и площадей на карте',
     measureMenuTitle: 'Измерение расстояний и площади',
     measureStart: 'Начать измерение',
@@ -547,14 +621,16 @@ var STRINGS = {
     measureCancel: 'Отменить',
     measureClearAll: function (n) { return 'Удалить все измерения (' + n + ')'; },
     measureClearAllConfirm: function (n) { return 'Удалить все (' + n + ') — нажмите ещё раз'; },
-    methodology: 'ⓘ Методика',
+    basemapTitle: 'Слои карты',
+    zoomIn: 'Приблизить',
+    zoomOut: 'Отдалить',
     methodologyTitle: 'Откуда берутся данные, как проверяется утверждение, как исправляются ошибки',
     langToggleTitle: 'Switch to English',
-    loading: 'Загрузка…',
     refreshed: function (time) { return 'Обновлено ' + time; },
     loadingTerritory: 'Загрузка территории…',
-    territoryLoaded: 'Территория загружена',
     controlAreasUnavailable: function (msg) { return 'Зоны контроля недоступны (' + msg + ')'; },
+    statsNotRefreshed: function (msg) { return 'Статистика территории не обновлена (' + msg + ')'; },
+    eventsNotRefreshed: function (msg) { return 'События не обновлены (' + msg + ')'; },
     countAreas: function (n) { return n + ' ' + pluralRu(n, 'зона', 'зоны', 'зон'); },
     statsHeader: 'Процент контролируемых территорий',
     ruPct: function (p) { return p + '% РФ'; },
@@ -617,7 +693,7 @@ var METHODOLOGY_CONTACT = null;
 
 // PARKED 2026-09-01 — flip to true to put the button back. Everything below stays wired up:
 // the panel, both languages, the backdrop and Escape, and the #methodology deep link all
-// still work. Only the toolbar button is hidden, which is the sole discoverable way in, so
+// still work. Only the ⓘ button is hidden, which is the sole discoverable way in, so
 // for a reader arriving at the map the methodology is simply not offered yet.
 //
 // Off because the operator intends to rewrite the text before readers see it, NOT because
@@ -1057,6 +1133,7 @@ function defaultBasemapForLang(lang) { return lang === 'ru' ? yandexRu : googleR
 var initialBasemap = ownBasemap;
 var map = L.map('map', {
   layers: [initialBasemap],
+  zoomControl: false,   // our own +/− card on the right edge (#zoom-group), wired below
   // Yandex is elliptical Mercator; getting this wrong at construction shifts every tile
   // against the vectors until the first basemap switch happens to fix it. Our own basemap is
   // 3857, and a fallback to Yandex goes through selectBasemap(), which does the switch.
@@ -1072,9 +1149,17 @@ map.attributionControl.addAttribution(
   'Boundaries derived from <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> (ODbL)'
 );
 L.control.scale({ position: 'bottomleft', imperial: false }).addTo(map);
+document.getElementById('zoom-in').addEventListener('click', function () { map.zoomIn(); });
+document.getElementById('zoom-out').addEventListener('click', function () { map.zoomOut(); });
+function syncZoomButtons() {
+  document.getElementById('zoom-in').disabled = map.getZoom() >= map.getMaxZoom();
+  document.getElementById('zoom-out').disabled = map.getZoom() <= map.getMinZoom();
+}
+map.on('zoomend', syncZoomButtons);
+syncZoomButtons();
 
 // ── Settlement search ───────────────────────────────────────────────────────
-// The field lives in the toolbar; settlement_search.js owns the matching and the
+// The field lives in the search card at the top centre; settlement_search.js owns the matching and the
 // dropdown, and map.html owns only what happens on a pick. See that file's header
 // for why a Russian query finds a Ukrainian name and why "Kiev" and "Kyiv" both work.
 var searchPin = null;
@@ -1129,30 +1214,46 @@ function selectBasemap(layer) {
   }
 }
 function buildBasemapControl(groups) {
-  var Ctl = L.Control.extend({
-    options: { position: 'topright' },
-    onAdd: function () {
-      var box = L.DomUtil.create('div', 'basemap-switcher');
-      groups.forEach(function (g) {
-        var h = L.DomUtil.create('div', 'bs-group-title', box);
-        h.textContent = g.title;
-        g.items.forEach(function (it) {
-          var row = L.DomUtil.create('label', 'bs-row', box);
-          var radio = L.DomUtil.create('input', '', row);
-          radio.type = 'radio'; radio.name = 'basemap';
-          radio.checked = it.layer === activeBasemap;
-          row.appendChild(document.createTextNode(' ' + it.label));
-          L.DomEvent.on(radio, 'click', function () { selectBasemap(it.layer); });
-        });
-      });
-      L.DomEvent.disableClickPropagation(box);
-      L.DomEvent.disableScrollPropagation(box);
-      return box;
-    }
+  var box = document.getElementById('basemap-pop');
+  box.innerHTML = '';
+  groups.forEach(function (g) {
+    var h = L.DomUtil.create('div', 'bs-group-title', box);
+    h.textContent = g.title;
+    g.items.forEach(function (it) {
+      var row = L.DomUtil.create('label', 'bs-row', box);
+      var radio = L.DomUtil.create('input', '', row);
+      radio.type = 'radio'; radio.name = 'basemap';
+      radio.checked = it.layer === activeBasemap;
+      row.appendChild(document.createTextNode(' ' + it.label));
+      L.DomEvent.on(radio, 'click', function () { selectBasemap(it.layer); });
+    });
   });
-  var instance = new Ctl();
-  map.addControl(instance);
-  return instance;
+}
+// The switcher is a popover under 🗺 (2026-10-03) rather than a list always open over the map.
+// It stays open while the reader tries layers, and closes on the button, Esc or a click
+// anywhere else.
+function setBasemapOpen(on) {
+  var box = document.getElementById('basemap-pop');
+  box.classList.toggle('open', on);
+  var btn = document.getElementById('tool-basemap');
+  btn.classList.toggle('active', on);
+  btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+  if (on) nudgeIntoView(box);
+}
+document.getElementById('tool-basemap').addEventListener('click', function () {
+  setBasemapOpen(!document.getElementById('basemap-pop').classList.contains('open'));
+});
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('#basemap-wrap')) setBasemapOpen(false);
+});
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setBasemapOpen(false); });
+// A popover hangs off its button's left corner; near the right edge of the window that runs
+// off screen, so it is moved back after layout. On a phone the CSS opens it to the left
+// instead (left: auto !important), and this has nothing to correct.
+function nudgeIntoView(el) {
+  el.style.left = '0px';
+  var over = el.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
+  if (over > 0) el.style.left = (-over) + 'px';
 }
 // Group headers and item labels come from t() (§ i18n above) so the switcher can be rebuilt
 // in the other language without losing which basemap is currently selected (selectBasemap
@@ -1174,11 +1275,8 @@ function basemapGroups() {
     ] },
   ];
 }
-var basemapControlInstance = null;
 function rebuildBasemapControl() {
-  if (basemapControlInstance) map.removeControl(basemapControlInstance);
-  basemapControlInstance = buildBasemapControl(basemapGroups());
-  placeEventPanel();   // the event panel sits under the switcher, which may have changed height
+  buildBasemapControl(basemapGroups());
 }
 rebuildBasemapControl();
 
@@ -1491,15 +1589,20 @@ function regionPopup(p) {
 
 // ── Loading ───────────────────────────────────────────────────────────────────
 // The two files are independent documents fetched independently: one missing or
-// malformed must not blank the other. Counts are tracked separately so the status bar
+// malformed must not blank the other. Counts are tracked separately so the status line
 // can say which half is live.
 var counts = { regions: null };
-var errors = { regions: null };
+// stats/history carry an error only while the panel on screen is the LAST good copy: a failed
+// re-load keeps what the reader already had rather than blanking it, and says so here. A panel
+// that never loaded stays hidden and says nothing (operator decision, 2026-10-03).
+var errors = { regions: null, stats: null, history: null };
 
 function report() {
   var msgEl = document.getElementById('status-msg');
   var errMsgs = [];
   if (errors.regions) errMsgs.push(t('controlAreasUnavailable')(errors.regions));
+  if (errors.stats) errMsgs.push(t('statsNotRefreshed')(errors.stats));
+  if (errors.history) errMsgs.push(t('eventsNotRefreshed')(errors.history));
 
   var stillLoading = counts.regions === null;
   if (errMsgs.length) {
@@ -1512,14 +1615,17 @@ function report() {
     // screen naming the date being shown, a minute after they picked it.
     return;
   } else {
-    msgEl.textContent = stillLoading ? t('loadingTerritory') : t('territoryLoaded');
+    // Silence when everything loaded (operator decision, 2026-10-03): the bar carries only
+    // what a reader needs to know — loading, a failure, a past date — plus the count and time.
+    msgEl.textContent = stillLoading ? t('loadingTerritory') : '';
     msgEl.className = '';
   }
 
   var r = counts.regions;
   document.getElementById('count').textContent = (r === null ? '' : t('countAreas')(r));
   document.getElementById('last-updated').textContent =
-    stillLoading ? t('loading') : t('refreshed')(new Date().toLocaleTimeString());
+    stillLoading ? '' : t('refreshed')(new Date().toLocaleTimeString());
+  placeBottomChrome();
 }
 
 // Settlement zones come from independent per-settlement raster grids (one WMS tile +
@@ -2141,7 +2247,7 @@ function clearFillTiles() {
 // version's prefix, fetched once each and cached for good. Under the flat layout (Pages) it is
 // every poll, as it always was there, and `built` is what tells a republish from a re-read.
 function loadFillTiles() {
-  var dir = published.fills;
+  var want = published, dir = published.fills;
   Promise.all([
     storageFetch(dir + '/manifest.json' + flatBust()).then(function (r) {
       if (r.status === 404) { var e = new Error('missing'); e.missing = true; throw e; }
@@ -2175,11 +2281,13 @@ function loadFillTiles() {
     }
     counts.regions = Object.keys(props).length;
     errors.regions = null;
+    loadedFor.fills = want;
     refreshFillTiles();
     report();
   }).catch(function (err) {
+    if (want !== published) return;   // overtaken by a newer version while in flight
     // A repo with no published territory yet is a valid state, not a failure.
-    if (err.missing) { counts.regions = 0; errors.regions = null; }
+    if (err.missing) { counts.regions = 0; errors.regions = null; loadedFor.fills = want; }
     else errors.regions = err.message;
     report();
   });
@@ -2243,10 +2351,19 @@ function renderStats() {
 }
 
 function loadStats() {
+  var want = published;
   storageFetch(published.stats + flatBust())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(function (data) { lastStats = data; renderStats(); })
-    .catch(function () { lastStats = null; document.getElementById('stats-widget').style.display = 'none'; });
+    .then(function (data) {
+      if (want !== published) return;   // overtaken by a newer version while in flight
+      lastStats = data; loadedFor.stats = want; errors.stats = null;
+      renderStats(); report();
+    })
+    .catch(function (err) {
+      if (want !== published) return;
+      // Keep what is on screen (lastStats untouched); refresh() retries next poll.
+      if (lastStats) { errors.stats = err.message; report(); }
+    });
 }
 
 // ── Frontline history: events scroller + calendar revert ───────────────────────────
@@ -2263,9 +2380,12 @@ var lastHistory = null;
 var HISTORY_VISIBLE_FROM = '2026-08-07';
 
 function loadHistory() {
+  var want = published;
   storageFetch(published.history + flatBust())
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) {
+      if (want !== published) return;   // overtaken by a newer version while in flight
+      loadedFor.history = want; errors.history = null; report();
       var entries = (data.entries || []).filter(function (e) { return e.date >= HISTORY_VISIBLE_FROM; });
       lastHistory = Object.assign({}, data, { entries: entries });
       document.getElementById('history-panel').classList.remove('hidden');
@@ -2280,9 +2400,10 @@ function loadHistory() {
       dateInput.value = eventsDay || '';
       renderEventsScroller();
     })
-    .catch(function () {
-      lastHistory = null;
-      document.getElementById('history-panel').classList.add('hidden');
+    .catch(function (err) {
+      if (want !== published) return;
+      // Keep the bar the reader already has; refresh() retries next poll.
+      if (lastHistory) { errors.history = err.message; report(); }
     });
 }
 
@@ -2362,8 +2483,10 @@ function mapGainText(side, v) {
 var historyCollapsed = true;
 function renderHistoryToggle() {
   var btn = document.getElementById('history-toggle');
-  btn.textContent = t('timelineHeader') + ' ' + (historyCollapsed ? '▸' : '▾');
+  btn.textContent = t('timelineHeader') + ' ' + (historyCollapsed ? '▸' : '▾')
+    + (eventsDay ? ' · ' + displayDate(eventsDay) : '');
   btn.title = t('timelineToggleTitle');
+  placeBottomChrome();
 }
 document.getElementById('history-toggle').addEventListener('click', function () {
   historyCollapsed = !historyCollapsed;
@@ -2553,13 +2676,39 @@ function renderEventPanel() {
 function placeEventPanel() {
   var box = document.getElementById('event-panel');
   if (!box || !box.classList.contains('open')) return;
-  var sw = document.querySelector('.basemap-switcher');
+  var tools = document.getElementById('tools');
   var wrap = document.getElementById('map-wrap');
-  var top = sw ? Math.round(sw.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top) + 10 : 10;
+  var top = Math.round(tools.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top) + 10;
   box.style.top = top + 'px';
-  box.style.maxHeight = 'calc(100% - ' + (top + 10) + 'px)';
+  box.style.maxHeight = 'calc(100% - ' + top + 'px - var(--bottom-clear))';
 }
 window.addEventListener('resize', function () { placeEventPanel(); updateEventArrows(); });
+
+// The bottom of the window, measured rather than fixed. Leaflet's scale and attribution keep the
+// edge itself (the attribution changes length with the basemap, and wraps to two lines on a
+// phone); the bar stands on them; what else sits low stands on the bar, whose height changes
+// when it opens, wraps onto two rows, or loses its timeline half.
+// Called directly wherever the bar changes (renderHistoryToggle(), report()), and by the
+// observer for what those miss — a wrap on resize, the cards arriving. The observer alone lags
+// by a rendering frame, and none comes while the page is not being painted.
+function placeBottomChrome() {
+  var root = document.documentElement.style;
+  var wrap = document.getElementById('map-wrap').getBoundingClientRect();
+  var strip = 0;
+  document.querySelectorAll('#map .leaflet-control-attribution, #map .leaflet-control-scale')
+    .forEach(function (el) {
+      var t = el.getBoundingClientRect();
+      if (t.height) strip = Math.max(strip, Math.round(wrap.bottom - t.top));
+    });
+  root.setProperty('--bar-bottom', (strip + 6) + 'px');
+  var r = document.getElementById('history-panel').getBoundingClientRect();
+  var clear = r.height ? Math.round(wrap.bottom - r.top) + 8 : strip + 8;
+  root.setProperty('--bottom-clear', clear + 'px');
+}
+var bottomObserver = new ResizeObserver(placeBottomChrome);
+bottomObserver.observe(document.getElementById('history-panel'));
+bottomObserver.observe(map.attributionControl.getContainer());
+window.addEventListener('resize', placeBottomChrome);
 
 // A click on the map is a click away. Not while measuring: there a click is a vertex.
 map.on('click', function () {
@@ -2591,6 +2740,7 @@ function updateEventArrows() {
 })();
 
 function renderEventsScroller() {
+  renderHistoryToggle();   // it names the day the bar is on
   var box = document.getElementById('events-scroller');
   if (!lastHistory || !lastHistory.entries.length) {
     box.innerHTML = ''; clearEventSelection(); updateEventArrows(); return;
@@ -3083,13 +3233,28 @@ function checkPublished() {
   });
 }
 
+// Which `published` each of the fills' manifest/props, stats and history last loaded from. Under the versioned layout a
+// poll loads only when version.json moved, and `published` moves BEFORE the loads finish — so a
+// load that failed (a 10 s timeout, a laptop waking with no network yet) used to stay failed
+// until the operator's next publish, and its catch had blanked the panel: the stats and the
+// events vanished until the reader reloaded the page. The fills had the same gap: their tiles
+// stayed up, but a manifest that failed right after a publish left the error on the status line
+// and the new version undrawn until a reload. Now anything not yet loaded from the version in
+// force is retried on every poll.
+var loadedFor = { fills: null, stats: null, history: null };
+
 var versionCheckFailed = false;
 function refresh() {
   checkPublished().then(function (changed) {
     // A poll that failed put its error on the status line; the next one that answers takes it
     // off, even when it has nothing new — otherwise an unchanged version would leave it there.
     if (versionCheckFailed) { versionCheckFailed = false; errors.regions = null; report(); }
-    if (!changed) return;
+    if (!changed) {
+      if (loadedFor.fills !== published) loadFillTiles();
+      if (loadedFor.stats !== published) loadStats();
+      if (loadedFor.history !== published) loadHistory();
+      return;
+    }
     loadFillTiles(); loadStats(); loadHistory();
   }).catch(function (err) {
     // Whatever was on screen stays on screen; the next poll asks again.
@@ -3467,14 +3632,7 @@ function setMeasureMenuOpen(on) {
   document.getElementById('tool-measure').setAttribute('aria-expanded', on ? 'true' : 'false');
   if (on) {
     renderMeasureMenu();
-    // The toolbar wraps on a narrow window, and the button can land close enough to the right
-    // edge that a 244px panel hanging off its left corner runs off screen. Nudged back after
-    // layout rather than pinned by a media query, because what decides it is where the button
-    // ended up, not how wide the window is.
-    var el = document.getElementById('measure-menu');
-    el.style.left = '0px';
-    var over = el.getBoundingClientRect().right - (document.documentElement.clientWidth - 8);
-    if (over > 0) el.style.left = (-over) + 'px';
+    nudgeIntoView(document.getElementById('measure-menu'));
   }
   syncMeasureButton();
 }
@@ -3609,8 +3767,13 @@ function renderStaticChrome() {
   // app-title is a fixed brand name — "CONFLICT MAP" stays in English in both languages,
   // unlike everything else here, so it deliberately isn't driven by t().
   var measureBtn = document.getElementById('tool-measure');
-  measureBtn.textContent = t('measure');
   measureBtn.title = t('measureTitle');
+  measureBtn.setAttribute('aria-label', t('measureTitle'));
+  var basemapBtn = document.getElementById('tool-basemap');
+  basemapBtn.title = t('basemapTitle');
+  basemapBtn.setAttribute('aria-label', t('basemapTitle'));
+  document.getElementById('zoom-in').title = t('zoomIn');
+  document.getElementById('zoom-out').title = t('zoomOut');
   // The menu and the readout are rebuilt from t() on every render anyway; an open popup is
   // the one measure surface that would otherwise sit in the old language until it is
   // reopened, so it is re-rendered in place.
@@ -3625,15 +3788,16 @@ function renderStaticChrome() {
   // a button that comes back unlabelled or in the wrong language is the usual way a parked
   // feature rots. The inline display:none in the markup is what stops it flashing on load;
   // clearing the property here is what lets it through once the flag is on.
-  methBtn.textContent = t('methodology');
   methBtn.title = t('methodologyTitle');
+  methBtn.setAttribute('aria-label', t('methodologyTitle'));
   methBtn.style.display = METHODOLOGY_ENABLED ? '' : 'none';
   // Re-render rather than merely relabel: the panel's prose is a whole document, and leaving
   // it in the previous language behind a translated button is the one place this page could
   // show two languages at once.
   if (methodologyIsOpen()) renderMethodology();
   var langBtn = document.getElementById('tool-lang');
-  langBtn.textContent = currentLang === 'en' ? 'RU' : 'EN';
+  // The language in force, as Yandex shows it; the title says what a click switches to.
+  langBtn.textContent = currentLang.toUpperCase();
   langBtn.title = t('langToggleTitle');
   document.getElementById('history-date').title = t('historyDateTitle');
   var liveBtn = document.getElementById('history-live');
@@ -3655,7 +3819,7 @@ function setLanguage(lang) {
   // reader who chose a layer keeps it. buildBasemapControl() reads activeBasemap fresh, which
   // is what preserves the selection across this rebuild.
   rebuildBasemapControl();
-  renderEventPanel();   // its text, and its place under the switcher just rebuilt
+  renderEventPanel();   // its text, and its place under the tool groups
   // Our own basemap is the one layer whose labels are ours to set, so it re-labels in place
   // rather than switching layers — the same map, its place names in the reader's language.
   // setStyle diffs against the current style, so only the text-field expressions change and
