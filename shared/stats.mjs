@@ -5,7 +5,7 @@
 
    Moved out of editor.html on 2026-08-30 with no change to any body. */
 
-import { nowIso, round3, geomAreaKm2 } from './geometry.mjs';
+import { nowIso, round3, geomAreaKm2 } from './geometry.mjs?v=13c00d0091fa';
 
 // ── Territory-held-per-side stats ───────────────────────────────────────────────
 // Published as its own small file so the public map can show a "percent of controlled

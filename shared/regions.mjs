@@ -7,7 +7,7 @@
 
    Moved out of editor.html on 2026-08-30. */
 
-import { snapDeep } from './geometry.mjs';
+import { snapDeep } from './geometry.mjs?v=13c00d0091fa';
 
 // Asserts the ordering invariants the shared canvas depends on, bottom of the stack to the
 // top: every zone_type:"oblast" wash first, so a wash can never paint over a claim; then

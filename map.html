@@ -219,6 +219,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   scrollbar-width: none;
 }
 #events-scroller::-webkit-scrollbar { display: none; }
+#events-scroller .ev-empty { align-self: center; font-size: 12px; color: #888; padding: 6px 4px; }
 .ev-arrow {
   flex-shrink: 0; width: 26px; background: #202020; color: #ccc; border: 1px solid #333;
   border-radius: 7px; font-size: 18px; line-height: 1; cursor: pointer;
@@ -355,7 +356,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: 
   </div>
   <div id="history-controls">
     <input type="date" id="history-date" title="Select a date to revert the frontline to how it looked at the end of that day"/>
-    <button id="history-live" class="active" title="Return to the live, current frontline">● Live</button>
+    <button id="history-live" class="active" title="Return to the current frontline and the latest changes">● Today</button>
   </div>
 </div>
 
@@ -414,7 +415,7 @@ if (!window.turf) {
 <!-- Local, and shared verbatim with editor.html. It fetches settlement_index.json
      lazily on the first focus of the search field, so the opening view still costs
      what it did before this feature existed. -->
-<script src="shared/settlement_search.js"></script>
+<script src="shared/settlement_search.js?v=13c00d0091fa"></script>
 
 <script type="module">
 // ───────────────────────────────────────────────────────────
@@ -432,12 +433,12 @@ if (!window.turf) {
 // changes), strict mode, and no longer the global scope. settlement_search.js stays a
 // classic script publishing `window.SettlementSearch`, which is READ below; Leaflet and turf
 // stay classic globals, which is how the modules' bodies moved across unchanged.
-import { ringAreaM2, geomAreaKm2, displayDate, displayDateTime } from './shared/geometry.mjs';
+import { ringAreaM2, geomAreaKm2, displayDate, displayDateTime } from './shared/geometry.mjs?v=13c00d0091fa';
 import {
   changeGeom, groupSameDayChanges, eventRepresentative, groupDelta, eventGainLabel,
   eventSourceOf,
-} from './shared/history.mjs';
-import { snapshotPath, snapshotIndexPath, snapshotForDate } from './shared/snapshots.mjs';
+} from './shared/history.mjs?v=13c00d0091fa';
+import { snapshotPath, snapshotIndexPath, snapshotForDate } from './shared/snapshots.mjs?v=13c00d0091fa';
 
 // Faction ids, colours AND display names must stay identical to listener.py,
 // bootstrap.html and editor.html (CONVENTIONS §5). The editor is the only writer,
@@ -493,8 +494,8 @@ var STRINGS = {
     timelineHeader: 'Timeline',
     timelineToggleTitle: 'Show or hide the timeline of recent changes',
     historyDateTitle: 'Select a date to revert the frontline to how it looked at the end of that day',
-    live: '● Live',
-    liveTitle: 'Return to the live, current frontline',
+    live: '● Today',
+    liveTitle: 'Return to the current frontline and the latest changes',
     showingAsOf: function (d) { return 'Showing frontline as of end of ' + d; },
     // Said when the picked date has no snapshot of its own and the newest one before it is
     // shown instead. The date the reader sees is the date the state is FROM, because that is
@@ -530,6 +531,7 @@ var STRINGS = {
     eventClose: 'Close',
     eventsNewer: 'Newer events',
     eventsOlder: 'Older events',
+    noChangesOnDay: 'No territory changes on this day',
     basemapMaps: 'Maps', basemapSatellite: 'Satellite', basemapTerrain: 'Terrain',
     layerYandexMap: 'Yandex (RU)', layerGoogleRoads: 'Google Roads',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Yandex Hybrid', layerGoogleHybrid: 'Google Hybrid',
@@ -560,8 +562,8 @@ var STRINGS = {
     timelineHeader: 'События',
     timelineToggleTitle: 'Показать или скрыть ленту последних изменений',
     historyDateTitle: 'Выберите дату, чтобы вернуть линию фронта к состоянию на конец этого дня',
-    live: '● Сейчас',
-    liveTitle: 'Вернуться к текущей линии фронта',
+    live: '● Сегодня',
+    liveTitle: 'Вернуться к текущей линии фронта и последним изменениям',
     showingAsOf: function (d) { return 'Линия фронта на конец ' + d; },
     showingNearest: function (shown, asked) {
       return 'Линия фронта на конец ' + shown + ' — последняя запись на ' + asked + ' или раньше';
@@ -586,6 +588,7 @@ var STRINGS = {
     eventClose: 'Закрыть',
     eventsNewer: 'Более новые события',
     eventsOlder: 'Более старые события',
+    noChangesOnDay: 'В эту дату территориальных изменений не зафиксировано',
     basemapMaps: 'Карты', basemapSatellite: 'Спутник', basemapTerrain: 'Рельеф',
     layerYandexMap: 'Яндекс (рус)', layerGoogleRoads: 'Google Дороги',
     layerSatelliteEsri: 'Satellite (Esri)', layerYandexHybrid: 'Яндекс Гибрид', layerGoogleHybrid: 'Google Гибрид',
@@ -2266,12 +2269,15 @@ function loadHistory() {
       var entries = (data.entries || []).filter(function (e) { return e.date >= HISTORY_VISIBLE_FROM; });
       lastHistory = Object.assign({}, data, { entries: entries });
       document.getElementById('history-panel').classList.remove('hidden');
-      var dates = entries.map(function (e) { return e.date; });
+      var dates = entries.map(function (e) { return e.date; }).sort();
       var dateInput = document.getElementById('history-date');
-      if (dates.length) {
-        dateInput.min = dates[0];
-        dateInput.max = todayIso();
-      }
+      // As far back as there are recorded changes, and no further forward than today.
+      if (dates.length) dateInput.min = dates[0];
+      dateInput.max = moscowTodayIso();
+      // A reader who has not picked a date follows the default, which moves on with the
+      // poll: a publish that adds today's first change moves the bar onto today.
+      if (!eventsDayChosen) eventsDay = defaultEventsDay();
+      dateInput.value = eventsDay || '';
       renderEventsScroller();
     })
     .catch(function () {
@@ -2280,9 +2286,39 @@ function loadHistory() {
     });
 }
 
-function todayIso() {
-  var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+// ── Which day the bar shows (2026-10-03) ─────────────────────────────────────────
+// The bar shows ONE day's cards, the day in the date picker — not every day since August.
+// It opens on today if today has changes, and otherwise on the last day that has any, with
+// the picker showing that date; the reader can still pick today, or any day back to the
+// first recorded change, and a day with nothing on it says so (noChangesOnDay).
+//
+// Picking a past day also turns the map back to that day, as it always did. Picking today is
+// the live map. "● Today" returns to the live map AND to the default day — which is the last
+// day with changes, so on a quiet morning the button shows yesterday's cards, by design.
+//
+// "Today" is Moscow's date (operator decision, 2026-10-03), not the reader's: the operator
+// dates entries on that clock, and a reader elsewhere would otherwise be told near midnight
+// that "today" has no changes while the operator's today does. Kept to this one function so
+// it is a one-line change if that decision moves.
+var eventsDay = null;          // YYYY-MM-DD the bar is showing
+var eventsDayChosen = false;   // true once the reader picks a date; ● Today clears it
+
+function moscowTodayIso() {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(new Date());
+}
+function eventDays() {
+  var seen = {};
+  ((lastHistory && lastHistory.entries) || []).forEach(function (e) {
+    if (e.changes && e.changes.length) seen[e.date] = true;
+  });
+  return Object.keys(seen).sort();
+}
+function defaultEventsDay() {
+  var days = eventDays(), today = moscowTodayIso();
+  if (days.indexOf(today) !== -1) return today;
+  var past = days.filter(function (d) { return d <= today; });
+  return past.length ? past[past.length - 1] : (days.length ? days[days.length - 1] : null);
 }
 
 function featureBoundsFromGeom(geom) {
@@ -2559,19 +2595,27 @@ function renderEventsScroller() {
   if (!lastHistory || !lastHistory.entries.length) {
     box.innerHTML = ''; clearEventSelection(); updateEventArrows(); return;
   }
-  // Flattened across all days, NEWEST FIRST (2026-10-03): the most recent event is the first
-  // card, on the left, where the row starts. Within a day the groups are reversed too —
-  // later in a day's `changes` is later in the day (see eventRepresentative()).
+  // One day only — eventsDay (see "Which day the bar shows"). Newest first within it: later
+  // in a day's `changes` is later in the day (see eventRepresentative()), so the groups are
+  // reversed and the latest event is the first card, on the left.
   var cards = [];
-  lastHistory.entries.slice()
-    .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; })
-    .forEach(function (e) {
-      groupSameDayChanges(e.changes).reverse().forEach(function (g) {
-        cards.push({ date: e.date, group: g, key: eventKey(e.date, g) });
-      });
+  lastHistory.entries.forEach(function (e) {
+    if (e.date !== eventsDay) return;
+    groupSameDayChanges(e.changes).reverse().forEach(function (g) {
+      cards.push({ date: e.date, group: g, key: eventKey(e.date, g) });
     });
-  var keepScroll = box.scrollLeft;   // a re-render (poll, language) must not throw the reader back
+  });
+  // A re-render of the same day (poll, language) must not throw the reader back; a new day
+  // starts at its newest card.
+  var keepScroll = box.dataset.day === eventsDay ? box.scrollLeft : 0;
+  box.dataset.day = eventsDay || '';
   box.innerHTML = '';
+  if (!cards.length) {
+    var empty = document.createElement('div');
+    empty.className = 'ev-empty';
+    empty.textContent = t('noChangesOnDay');
+    box.appendChild(empty);
+  }
   cards.forEach(function (item) {
     var rep = eventRepresentative(item.group);
     var gain = eventGainLabel(rep, groupDelta(item.group), livePatternOf, mapGainText);
@@ -2953,7 +2997,8 @@ function showHistoricalDate(targetDate) {
 }
 function showLive() {
   selectedDate = null;
-  document.getElementById('history-date').value = '';
+  if (!eventsDayChosen) eventsDay = defaultEventsDay();
+  document.getElementById('history-date').value = eventsDay || '';
   document.getElementById('history-live').classList.add('active');
   // Drop the reconstructed full-file layers and hand the live view back to the tiles.
   if (regionLayer) { map.removeLayer(regionLayer); regionLayer = null; }
@@ -2962,12 +3007,24 @@ function showLive() {
   contestedEdgeGroup.clearLayers();
   refreshFillTiles();
   report();
+  renderEventsScroller();
 }
 
+// Today (or later, which max= already refuses) is the live map; any earlier day is that day's
+// frontline. Either way the bar switches to the picked day's cards.
 document.getElementById('history-date').addEventListener('change', function (e) {
-  if (e.target.value) showHistoricalDate(e.target.value);
+  var v = e.target.value;
+  if (!v) return;
+  eventsDayChosen = true;
+  eventsDay = v;
+  if (v >= moscowTodayIso()) { showLive(); return; }
+  showHistoricalDate(v);
+  renderEventsScroller();
 });
-document.getElementById('history-live').addEventListener('click', showLive);
+document.getElementById('history-live').addEventListener('click', function () {
+  eventsDayChosen = false;
+  showLive();
+});
 
 // ── What is published, and where: two layouts, one page ────────────────────────────
 // §4.3, the reading loop:
