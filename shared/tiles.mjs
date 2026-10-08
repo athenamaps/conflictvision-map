@@ -12,8 +12,8 @@
 
    Moved out of editor.html on 2026-08-30 with no change to any body. */
 
-import { nowIso, geomAreaKm2 } from './geometry.mjs?v=13c00d0091fa';
-import { orderRegions } from './regions.mjs?v=13c00d0091fa';
+import { nowIso, geomAreaKm2 } from './geometry.mjs?v=64e6e6fdf12c';
+import { orderRegions } from './regions.mjs?v=64e6e6fdf12c';
 
 // ─────────────────────────────────────────────────────────────
 // FILL TILES — the published rendering projection of control_regions.geojson

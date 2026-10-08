@@ -20,7 +20,7 @@
 
    Moved out of editor.html and map.html on 2026-08-30 with no change to any body. */
 
-import { nowIso, snapDeep } from './geometry.mjs?v=13c00d0091fa';
+import { nowIso, snapDeep } from './geometry.mjs?v=64e6e6fdf12c';
 
 // The version stamp on both the local timeline.json and the published projection below.
 // It lives here rather than in editor.html because it is the timeline schema's version and
